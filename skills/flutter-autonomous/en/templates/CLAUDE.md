@@ -92,10 +92,10 @@ Purpose: (1) before screenshot/tap, confirm the foreground isn't them; (2) at te
 
 ## Project-Specific Irreversible / Red Lines (stop and require a human, don't act on your own)
 
-`{{IRREVERSIBLE_REDLINES}}` — beyond the skill's four red lines (device physically offline / real-money trade / private key or secret / irreversible destruction), the irreversible actions **specific to this project**. On a hit: stop, produce a report, wait for a human:
+`{{IRREVERSIBLE_REDLINES}}` — beyond the skill's four red lines (device physically offline / real-money operations / secret or credential operations / irreversible destruction), the irreversible actions **specific to this project**. On a hit: stop, produce a report, wait for a human:
 
 ```
-{{IRREVERSIBLE_REDLINES}}    # e.g. any on-chain/paid/charging operation; changing production config; deleting user data; touching keys/mnemonics
+{{IRREVERSIBLE_REDLINES}}    # fill per your app's domain. e-commerce: real orders/payments/refunds; social: messaging real users/publishing; blockchain: on-chain transactions/private keys or mnemonics; generic: changing production config/deleting user data
 ```
 
 ---

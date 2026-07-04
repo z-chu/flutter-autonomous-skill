@@ -111,7 +111,20 @@ mobilecli agent install --device <udid> --provisioning-profile /path/to/x.mobile
 mobilecli agent install --device <udid> --provisioning-profile /path/to/x.mobileprovision --force   # 强制重装
 ```
 
+**provisioning profile 捷径**：不必单独准备 WDA 专用描述文件。**app 自身的 `embedded.mobileprovision` 就能用**，mobilecli 会用它重签 WDA agent：
+
+```bash
+# Flutter 项目 debug 构建的 embedded.mobileprovision（构建过一次即可取到）
+mobilecli agent install \
+  --device <udid> \
+  --provisioning-profile build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision
+```
+
+> 如果 debug 构建产物不存在，可先跑一次 `flutter build ios --debug`，或直接在 Xcode 里 Run 一次让 Xcode 完成签名；产物落到 `build/ios/Debug-iphoneos/Runner.app/` 后再装 agent。
+
 装好后，`io tap` / `dump ui` / `screenshot` 等命令与模拟器**完全一致**，差异已被 mobilecli 抹平。
+
+**⚠️ 真机截图速度**：iOS 真机经 WDA over USB 隧道截图每次约 **15–20 秒**（首次更长，含 WDA 冷启），属正常。建议减少截图频率——优先用 `dump ui` 判断页面状态，只在必要时（页面跳转验证、视觉布局核验）才截图。
 
 ### 2.3 mobile-mcp 真机：另需 go-ios + 隧道 + WDA
 
@@ -140,7 +153,7 @@ keystone 的"检视优先 → 按 label 点 rect 中心"在 iOS 上**一字不�
 D=<udid>                                               # 从 mobilecli devices 取，别写死
 mobilecli apps launch     <bundleId> --device "$D"     # 拉前台
 mobilecli apps foreground --device "$D"                # 确认前台=目标包（防串台）
-mobilecli dump ui         --device "$D" > "$UI"        # 经 WDA 取元素：label/name + 屏幕坐标 rect
+mobilecli dump ui         --device "$D" > "$UI"        # 经 WDA 取元素：label/name + 屏幕坐标 rect（⚠️ 勿加 2>&1）
 # 按 label 挑目标，点 rect 中心：
 mobilecli io tap   --device "$D" <cx>,<cy>
 mobilecli io swipe --device "$D" x1,y1,x2,y2
@@ -149,6 +162,8 @@ mobilecli screenshot --device "$D" -o "$SHOT"          # → Read 核验
 ```
 
 `scripts/tap-by-label.sh <deviceId> "<label子串>"`（keystone 提供）在 iOS 同样适用——内部 `dump ui` → jq 按 label 取 rect 中心 → `io tap`。
+
+> **iOS stderr 日志**：iOS 真机经 WDA/USB 隧道运行时，`mobilecli` 会在 **stderr** 输出大量 `INFO connect to lockdown...` 日志。这些日志走 stderr、不走 stdout，所以 `dump ui > "$UI"` 能得到干净 JSON。**注意**：若写成 `dump ui > "$UI" 2>&1`（把 stderr 合并进文件），日志会污染 JSON 导致解析失败。加 `2>/dev/null` 可消除终端噪声，但不是必须。Android 无此问题。
 
 ### 3.1 WDA 元素过滤规则 → 为什么 Flutter 控件仍要暴露 Semantics
 
@@ -197,14 +212,14 @@ Patrol 走 Dart VM 直连 widget 树按 `Key` 查找+断言，**不依赖 WDA �
 
 ## 6. 自举 iOS 检查项（缺则自己装/起，别停人工）
 
-进自主模式先跑这几条体检；对应 keystone §0 的"检测→缺则装→独立命令回验"。**装工具/起模拟器/装 WDA 都是可逆低风险，自己做完接着干**——只有"真机物理掉线、要真金交易、密钥操作、不可逆破坏"才停（keystone 四红线）。
+进自主模式先跑这几条体检；对应 keystone §0 的"检测→缺则装→独立命令回验"。**装工具/起模拟器/装 WDA 都是可逆低风险，自己做完接着干**——只有"真机物理掉线、花真钱的操作、密钥凭证操作、不可逆破坏"才停（keystone 四红线）。
 
 | 检查 | 命令 | 期望 / 缺了怎么办 |
 |---|---|---|
 | Xcode CLT 在位 | `xcode-select -p` | 输出一个路径（如 `/Applications/Xcode.app/...` 或 `/Library/Developer/CommandLineTools`）；空/报错 → `xcode-select --install`（GUI 装则提示用户，CI 上预装） |
 | 有已启动的模拟器 | `xcrun simctl list devices booted` | 列出至少一台 `(Booted)`；空 → `xcrun simctl list devices` 挑一台 → `xcrun simctl boot <udid>`（或 `mobilecli device boot`） |
 | mobilecli 看得到设备 | `mobilecli devices` | 含 `platform:ios`；空且模拟器已 boot → 等几秒重试 |
-| WDA 在跑 | `curl -s localhost:8100/status` | JSON 含 `"ready":true`；不通 → mobilecli `agent install --device <udid>`（真机加 `--provisioning-profile`），模拟器会自动起 WDA |
+| WDA 在跑 | `curl -s localhost:8100/status` | JSON 含 `"ready":true`；不通 → mobilecli `agent install --device <udid>`（真机加 `--provisioning-profile`，**直接用 app 自身的 `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision` 即可，见 §2.2**），模拟器会自动起 WDA |
 | 真机：go-ios 在位（仅走 mobile-mcp 真机时） | `which ios` && `ios version` | 有路径且版本以 `v` 开头；缺 → `npm i -g go-ios` |
 | 真机：隧道（iOS 17+，走 mobile-mcp 时） | `curl -s localhost:60105` 或检查端口监听 | 端口在听；不通 → 用 go-ios 起隧道（mobilecli 自动起，无需手动） |
 

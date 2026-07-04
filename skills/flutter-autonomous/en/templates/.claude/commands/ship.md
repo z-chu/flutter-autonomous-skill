@@ -6,7 +6,7 @@ argument-hint: [one-line requirement, including "what done looks like"]
 
 Requirement: $ARGUMENTS
 
-**Execute fully autonomously.** Reversible low-risk work (installing tools / changing local config / adding dependencies / scaffolding tests) — do it and keep going; only stop when you hit one of the four red lines (device physically disconnected / real-money on-chain transaction / private-key or secret-key operations / irreversible destruction) or when the requirement has an ambiguity you cannot resolve on your own. Rules, lookup priority, the Key+Semantics dual-standard, hot reload tiers, and the two teardown steps all align with the `flutter-autonomous` skill; this command only drives the flow. **Committing is not a default action** — handle it per the user's commit policy (see Step 5).
+**Execute fully autonomously.** Reversible low-risk work (installing tools / changing local config / adding dependencies / scaffolding tests) — do it and keep going; only stop when you hit one of the four red lines (device physically disconnected / real-money operations / secret or credential operations / irreversible destruction, plus the project CLAUDE.md's project-specific red lines) or when the requirement has an ambiguity you cannot resolve on your own. Rules, lookup priority, the Key+Semantics dual-standard, hot reload tiers, and the two teardown steps all align with the `flutter-autonomous` skill; this command only drives the flow. **Committing is not a default action** — handle it per the user's commit policy (see Step 5).
 
 ---
 

@@ -46,11 +46,11 @@ description: Flutter 真机/模拟器自主运行与自动化测试验证(iOS + 
 | **patrol_cli** | `patrol --version` | 缺 → `dart pub global activate patrol_cli`;装了报 not found → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
 | 项目 Patrol 配置 | pubspec 有 `patrol` dev_dep + `patrol:` 段 + `integration_test/` | 缺 → `flutter pub add patrol --dev` + 补 `patrol:` 段 + Android `androidTest` 脚手架。项目级一次性投入,**装好继续** |
 | node(npx 用) | `node -v`(需 v22+) | 缺 → fnm/nvm 装 |
-| **iOS 专属**(仅 mac) | 见 `references/ios.md` | Xcode CLT、模拟器、真机走 WDA+provisioning;Linux 无 iOS 工具链,自动只跑 Android |
+| **iOS 专属**(仅 mac) | 见 `references/ios.md` | Xcode CLT、模拟器、真机走 WDA+provisioning(真机装 agent 直接用 app 自身 `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision`);Linux 无 iOS 工具链,自动只跑 Android |
 
 `npx mobilewright doctor --json` 可作跨平台体检入口(覆盖 Node/mobilecli/Xcode/Simulators/agent/Java/ADB),再叠 `flutter doctor` + patrol。详见 `references/android.md`、`references/ios.md`。
 
-**红线(才真的停下要人工)**:① 设备物理掉线/没插;② 要花真金的链上交易;③ 私钥/助记词/密钥操作;④ 不可逆破坏(删数据/改生产)。**除此之外**——装工具、改本地配置、补依赖、scaffold 测试,都是可逆低风险,**做完接着干**,别把"工具没装好"当停下理由。
+**红线(才真的停下要人工)**:① 设备物理掉线/没插;② 花真钱/影响真实用户的操作(支付/扣费/转账/下单;区块链 App 的上链交易同理);③ 密钥/凭证操作(生产密钥/签名证书/用户凭证/私钥助记词);④ 不可逆破坏(删数据/改生产)。本项目特有红线在项目 `CLAUDE.md` 的 `{{IRREVERSIBLE_REDLINES}}` 里补充,同等效力。**除此之外**——装工具、改本地配置、补依赖、scaffold 测试,都是可逆低风险,**做完接着干**,别把"工具没装好"当停下理由。
 
 ---
 
@@ -239,5 +239,5 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 7. 断言失败=逻辑 bug,**修实现不改测试降标准**;自修复**≤5 轮**,第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告继续下个任务。
 8. **提交不是本 skill 的职责**:要不要 / 怎么提交按用户提交策略(开工前问清:增量提 / 最后提 / 不提 / 其它);提交规范以用户全局 / 项目 `CLAUDE.md` 为准,别替用户决定,别默认自动提交。
 
-**Never 才停下要人工(四红线)**:① 设备物理掉线 ② 真金链上交易 ③ 私钥/密钥操作 ④ 不可逆破坏。除此自己做完接着干。
+**Never 才停下要人工(四红线)**:① 设备物理掉线 ② 花真钱的操作(支付/转账/上链) ③ 密钥/凭证操作 ④ 不可逆破坏;外加项目 `CLAUDE.md` 的特有红线。除此自己做完接着干。
 **Never 反模式**:有 Semantics 时盲点坐标 / 写死历史坐标(必须运行期从 dump 现取)/ 把 `kill flutter run` 当关 App / 改测试绕过断言 / 把"执行了操作"当"达到了结果"。

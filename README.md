@@ -102,7 +102,7 @@ flowchart LR
 
 **One interaction substrate.** iOS (WebDriverAgent / `xcrun simctl`) and Android (`adb`) differences are absorbed by [`mobilecli`](https://github.com/mobile-next/mobilecli) — the skill's playbooks are written once and run on both. Platform edge cases live in [`references/ios.md`](skills/flutter-autonomous/references/ios.md) and [`references/android.md`](skills/flutter-autonomous/references/android.md).
 
-**Hard rules, not vibes.** The skill ships an explicit Always/Never contract: never guess element names (inspect first), never weaken a test to make it pass, never claim "done" without independent re-verification, never stop for anything self-fixable — and always stop for the four red lines (device physically offline, real-money transactions, private-key operations, irreversible destruction).
+**Hard rules, not vibes.** The skill ships an explicit Always/Never contract: never guess element names (inspect first), never weaken a test to make it pass, never claim "done" without independent re-verification, never stop for anything self-fixable — and always stop for the four red lines (device physically offline, real-money operations, secret/credential operations, irreversible destruction).
 
 ## What's inside
 
@@ -155,7 +155,7 @@ No. Committing is explicitly **not this skill's job**: it asks for your commit p
 <details>
 <summary><b>Is it safe to run unattended?</b></summary>
 
-The skill has four hard red lines where it always stops for a human: device physically offline, real-money/on-chain transactions, private-key or secret operations, and irreversible destruction. Everything else (installing tools, scaffolding tests, fixing failures) is reversible and handled autonomously. See [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) for the trust ladder — start by watching one run, then let go gradually.
+The skill has four **universal** red lines where it always stops for a human: device physically offline, operations that spend real money (payments, transfers, on-chain transactions…), secret/credential operations, and irreversible destruction. Red lines beyond that are project-specific by nature — declare yours (a marketplace's real orders, a wallet's seed phrases) in your project CLAUDE.md's `{{IRREVERSIBLE_REDLINES}}` and the skill enforces them the same way. Everything else (installing tools, scaffolding tests, fixing failures) is reversible and handled autonomously. See [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) for the trust ladder — start by watching one run, then let go gradually.
 </details>
 
 <details>

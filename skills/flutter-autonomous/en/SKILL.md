@@ -46,11 +46,11 @@ One-shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, id
 | **patrol_cli** | `patrol --version` | Missing → `dart pub global activate patrol_cli`; installed but reports not found → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
 | Project Patrol config | pubspec has `patrol` dev_dep + `patrol:` section + `integration_test/` | Missing → `flutter pub add patrol --dev` + add the `patrol:` section + Android `androidTest` scaffold. A one-time project-level investment, **install it and continue** |
 | node (used by npx) | `node -v` (needs v22+) | Missing → install via fnm/nvm |
-| **iOS-only** (mac only) | see `references/ios.md` | Xcode CLT, simulator; real device goes via WDA+provisioning; Linux has no iOS toolchain, automatically runs Android only |
+| **iOS-only** (mac only) | see `references/ios.md` | Xcode CLT, simulator; real device goes via WDA+provisioning (to install the agent on a real device, just use the app's own `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision`); Linux has no iOS toolchain, automatically runs Android only |
 
 `npx mobilewright doctor --json` works as a cross-platform health-check entry point (covers Node/mobilecli/Xcode/Simulators/agent/Java/ADB), then layer on `flutter doctor` + patrol. See `references/android.md`, `references/ios.md` for details.
 
-**Red lines (the only cases where you truly stop for a human)**: ① device physically disconnected/unplugged; ② an on-chain transaction that costs real money; ③ private key/mnemonic/key operations; ④ irreversible destruction (deleting data/changing production). **Other than these** — installing tools, changing local config, adding dependencies, scaffolding tests are all reversible and low-risk, so **finish them and keep going**; don't treat "the tool isn't installed" as a reason to stop.
+**Red lines (the only cases where you truly stop for a human)**: ① device physically disconnected/unplugged; ② operations that spend real money or affect real users (payments/charges/transfers/orders; on-chain transactions for blockchain apps); ③ secret/credential operations (production keys/signing certs/user credentials/private keys & mnemonics); ④ irreversible destruction (deleting data/changing production). Project-specific red lines added via `{{IRREVERSIBLE_REDLINES}}` in the project `CLAUDE.md` carry the same force. **Other than these** — installing tools, changing local config, adding dependencies, scaffolding tests are all reversible and low-risk, so **finish them and keep going**; don't treat "the tool isn't installed" as a reason to stop.
 
 ---
 
@@ -239,5 +239,5 @@ Whether to commit and how to commit **is decided by the user's commit policy; th
 7. Assertion fail = logic bug, **fix the implementation, don't change the test to lower the bar**; self-fix **≤5 rounds**, on round 3 note tried directions, on round 4 switch approach, on round 5 stop and emit a stuck report, continue to the next task.
 8. **Committing is not this skill's job**: whether to / how to commit follows the user's commit policy (ask up front: incremental commit / final commit / no commit / other); commit conventions follow the user's global / project `CLAUDE.md` — don't decide on the user's behalf, don't auto-commit by default.
 
-**Never stop for a human except (four red lines)**: ① device physically disconnected ② real-money on-chain transaction ③ private key/key operations ④ irreversible destruction. Otherwise do it yourself and keep going.
+**Never stop for a human except (four red lines)**: ① device physically disconnected ② real-money operations (payments/transfers/on-chain) ③ secret/credential operations ④ irreversible destruction; plus the project-specific red lines from the project `CLAUDE.md`. Otherwise do it yourself and keep going.
 **Never anti-patterns**: blind-tap coordinates when Semantics exists / hardcoding historical coordinates (must be fetched live from dump at runtime) / treating `kill flutter run` as closing the app / changing the test to bypass an assertion / treating "I ran the operation" as "I achieved the result".

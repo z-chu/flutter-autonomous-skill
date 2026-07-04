@@ -111,7 +111,20 @@ mobilecli agent install --device <udid> --provisioning-profile /path/to/x.mobile
 mobilecli agent install --device <udid> --provisioning-profile /path/to/x.mobileprovision --force   # force reinstall
 ```
 
+**Provisioning profile shortcut**: you don't need a dedicated WDA profile. **The app's own `embedded.mobileprovision` works** — mobilecli uses it to re-sign the WDA agent:
+
+```bash
+# the embedded.mobileprovision from the Flutter project's debug build (available after one build)
+mobilecli agent install \
+  --device <udid> \
+  --provisioning-profile build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision
+```
+
+> If the debug build artifact doesn't exist yet, run `flutter build ios --debug` once, or Run once from Xcode to let it sign; after the artifact lands in `build/ios/Debug-iphoneos/Runner.app/`, install the agent.
+
 Once installed, commands like `io tap` / `dump ui` / `screenshot` are **exactly the same** as on the simulator — the difference has been smoothed over by mobilecli.
+
+**⚠️ Real-device screenshot speed**: on a real iOS device, each screenshot via WDA over the USB tunnel takes about **15–20 seconds** (longer on the first one, including WDA cold start) — this is normal. Reduce screenshot frequency — prefer `dump ui` to judge page state, and only take screenshots when necessary (verifying navigation, checking visual layout).
 
 ### 2.3 mobile-mcp real device: additionally needs go-ios + tunnel + WDA
 
@@ -140,7 +153,7 @@ The keystone's "inspect first → tap the rect center by label" is **unchanged**
 D=<udid>                                               # get it from mobilecli devices, don't hard-code
 mobilecli apps launch     <bundleId> --device "$D"     # bring to foreground
 mobilecli apps foreground --device "$D"                # confirm foreground = target bundle (cross-talk guard)
-mobilecli dump ui         --device "$D" > "$UI"        # fetch elements via WDA: label/name + on-screen rect
+mobilecli dump ui         --device "$D" > "$UI"        # fetch elements via WDA: label/name + on-screen rect (⚠️ don't add 2>&1)
 # pick the target by label, tap the rect center:
 mobilecli io tap   --device "$D" <cx>,<cy>
 mobilecli io swipe --device "$D" x1,y1,x2,y2
@@ -149,6 +162,8 @@ mobilecli screenshot --device "$D" -o "$SHOT"          # → Read to verify
 ```
 
 `scripts/tap-by-label.sh <deviceId> "<label substring>"` (provided by the keystone) works on iOS too — internally `dump ui` → jq picks the rect center by label → `io tap`.
+
+> **iOS stderr logs**: when a real iOS device runs via the WDA/USB tunnel, `mobilecli` prints a lot of `INFO connect to lockdown...` logs to **stderr**. These go to stderr, not stdout, so `dump ui > "$UI"` yields clean JSON. **Note**: if you write `dump ui > "$UI" 2>&1` (merging stderr into the file), the logs pollute the JSON and break parsing. Adding `2>/dev/null` silences terminal noise but is not required. Android has no such issue.
 
 ### 3.1 WDA element-filtering rules → why Flutter widgets still need to expose Semantics
 
@@ -197,14 +212,14 @@ Patrol connects directly to the widget tree via the Dart VM and finds+asserts by
 
 ## 6. Bootstrap iOS checklist (if missing, install/start it yourself, don't stop for a human)
 
-When entering autonomous mode, first run these health checks; they correspond to the keystone §0 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all reversible and low-risk — do it yourself and keep going** — only stop for "real device physically disconnected, real-money trade, key operations, irreversible destruction" (the keystone's four red lines).
+When entering autonomous mode, first run these health checks; they correspond to the keystone §0 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all reversible and low-risk — do it yourself and keep going** — only stop for "real device physically disconnected, real-money operations, secret/credential operations, irreversible destruction" (the keystone's four red lines).
 
 | Check | Command | Expected / what to do if missing |
 |---|---|---|
 | Xcode CLT present | `xcode-select -p` | Outputs a path (e.g. `/Applications/Xcode.app/...` or `/Library/Developer/CommandLineTools`); empty/error → `xcode-select --install` (a GUI install means prompt the user; pre-install on CI) |
 | A booted simulator exists | `xcrun simctl list devices booted` | Lists at least one `(Booted)`; empty → `xcrun simctl list devices` to pick one → `xcrun simctl boot <udid>` (or `mobilecli device boot`) |
 | mobilecli sees the device | `mobilecli devices` | Contains `platform:ios`; empty and the simulator is already booted → wait a few seconds and retry |
-| WDA running | `curl -s localhost:8100/status` | JSON contains `"ready":true`; not reachable → mobilecli `agent install --device <udid>` (add `--provisioning-profile` for a real device); the simulator auto-launches WDA |
+| WDA running | `curl -s localhost:8100/status` | JSON contains `"ready":true`; not reachable → mobilecli `agent install --device <udid>` (add `--provisioning-profile` for a real device — **just use the app's own `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision`, see §2.2**); the simulator auto-launches WDA |
 | Real device: go-ios present (only for the mobile-mcp real-device path) | `which ios` && `ios version` | Has a path and the version starts with `v`; missing → `npm i -g go-ios` |
 | Real device: tunnel (iOS 17+, when going through mobile-mcp) | `curl -s localhost:60105` or check the port listening | The port is listening; not reachable → start the tunnel with go-ios (mobilecli starts it automatically, no manual step) |
 
