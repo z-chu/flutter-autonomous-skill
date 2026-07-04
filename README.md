@@ -2,7 +2,7 @@
 
 > An [Agent Skill](https://agentskills.io) that turns Claude Code into an autonomous Flutter engineer: it runs your app on a **real device or simulator**, taps and reads the screen like a human, and drives the full **implement → test → fix** loop unattended — **iOS and Android at parity**.
 
-[![skills.sh](https://skills.sh/b/z-chu/flutter-autonomous-skill)](https://skills.sh/z-chu/flutter-autonomous-skill)
+[![skills.sh](https://img.shields.io/badge/skills.sh-flutter--autonomous-black)](https://skills.sh/z-chu/flutter-autonomous-skill)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey.svg)](#platform-support)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Agent%20Skill-d97757.svg)](https://code.claude.com/docs/en/skills)

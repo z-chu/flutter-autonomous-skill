@@ -2,7 +2,7 @@
 
 > 一个 [Agent Skill](https://agentskills.io)，把 Claude Code 变成会自己跑真机的 Flutter 工程师：把 App 跑到**真机 / 模拟器**上，像人一样点屏幕、看结果，无人监督地跑完 **实现 → 测试 → 修复** 闭环 —— **iOS 与 Android 完全对等**。
 
-[![skills.sh](https://skills.sh/b/z-chu/flutter-autonomous-skill)](https://skills.sh/z-chu/flutter-autonomous-skill)
+[![skills.sh](https://img.shields.io/badge/skills.sh-flutter--autonomous-black)](https://skills.sh/z-chu/flutter-autonomous-skill)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20Android-lightgrey.svg)](#平台支持)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-Agent%20Skill-d97757.svg)](https://code.claude.com/docs/en/skills)
