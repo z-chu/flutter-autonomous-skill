@@ -90,12 +90,20 @@ Purpose: (1) before screenshot/tap, confirm the foreground isn't them; (2) at te
 
 ---
 
-## Project-Specific Irreversible / Red Lines (stop and require a human, don't act on your own)
+## Project-Specific Irreversible / Red Lines (denied by default, don't act on your own)
 
-`{{IRREVERSIBLE_REDLINES}}` — beyond the skill's four red lines (device physically offline / real-money operations / secret or credential operations / irreversible destruction), the irreversible actions **specific to this project**. On a hit: stop, produce a report, wait for a human:
+`{{IRREVERSIBLE_REDLINES}}` — beyond the skill's four red lines (device physically offline / real-money operations / secret or credential operations / irreversible destruction), the red-line actions **specific to this project**. Red lines are never done by default: an interactive session may pause and ask once; an unattended run skips the item, marks "authorization needed" in the report, and continues:
 
 ```
 {{IRREVERSIBLE_REDLINES}}    # fill per your app's domain. e-commerce: real orders/payments/refunds; social: messaging real users/publishing; blockchain: on-chain transactions/private keys or mnemonics; generic: changing production config/deleting user data
+```
+
+### Authorized Red-Line Exceptions (all denied by default — only what you write here may be done)
+
+`{{AUTHORIZED_REDLINE_EXCEPTIONS}}` — red-line operations (real money / secrets & credentials / irreversible) are **never done by default**; only what you explicitly allow here (or in this run's instructions) will be performed, and only within the stated scope:
+
+```
+{{AUTHORIZED_REDLINE_EXCEPTIONS}}   # e.g. "sandbox environment may place real orders/payments", "testnet (devnet) transactions allowed", "test-account data may be wiped"; if everything is forbidden, write "none"
 ```
 
 ---

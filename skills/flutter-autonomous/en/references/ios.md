@@ -212,7 +212,7 @@ Patrol connects directly to the widget tree via the Dart VM and finds+asserts by
 
 ## 6. Bootstrap iOS checklist (if missing, install/start it yourself, don't stop for a human)
 
-When entering autonomous mode, first run these health checks; they correspond to the keystone §0 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all reversible and low-risk — do it yourself and keep going** — only stop for "real device physically disconnected, real-money operations, secret/credential operations, irreversible destruction" (the keystone's four red lines).
+When entering autonomous mode, first run these health checks; they correspond to the keystone §0 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all reversible and low-risk — do it yourself and keep going** — only stop for "real device physically disconnected, real-money operations, secret/credential operations, irreversible destruction" (the keystone's red lines — the last three are denied by default and need explicit upfront authorization; a physically offline device is the one hard stop).
 
 | Check | Command | Expected / what to do if missing |
 |---|---|---|

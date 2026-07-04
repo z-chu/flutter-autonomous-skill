@@ -17,7 +17,7 @@ Rules, locator priority, the Key+Semantics dual annotation, failure classificati
 1. **Strictly in order**, one at a time, **no parallelism** (parallel runs against the same codebase collide on files, contend for the device, and cross-talk).
 2. **Each task runs the full `/ship` flow**: set the criteria → implement (+Key+Semantics+matching tests) → four-layer verification → screenshot verification → (handle committing per the user's commit policy, no auto-commit by default).
 3. **Stuck ceiling**: ≤5 self-repair rounds per task. Still failing on the 5th round → mark ⚠️, record the directions already tried, **skip and continue to the next**.
-4. **On ambiguity**: the task description itself has ambiguity you cannot resolve on your own (unsure which page to jump to / unclear UI / unclear platform) → mark ⚠️, **skip and continue to the next**, don't silently decide for me.
+4. **On ambiguity**: the task description itself has ambiguity you cannot resolve on your own (unsure which page to jump to / unclear UI / unclear platform) → mark ⚠️, **skip and continue to the next**, don't silently decide for me. A task requiring an **unauthorized red-line operation** (real money / secrets / irreversible) is likewise marked ⚠️ and skipped, noting in the report what authorization is needed — **never hang waiting for my reply**.
 5. **Device offline**: if environment self-bootstrap/recovery + one reconnect still fails → **stop all remaining tasks**, emit a "device offline" report (any commits already made are kept).
 6. **Commit per the user's commit policy** (clarify up front: commit-as-you-go / one at the end / don't commit / other); **no push** by default, wait for human review in the morning.
 
@@ -53,7 +53,7 @@ Device: <id/platform freshly obtained from mobilecli devices>
 | # | Feature | Status | Commit |
 |---|---------|--------|--------|
 | 1 | feature name | ✅ done | abc1234 |
-| 2 | feature name | ⚠️ skipped (5 rounds failed / ambiguous) | — |
+| 2 | feature name | ⚠️ skipped (5 rounds failed / ambiguous / authorization needed) | — |
 | 3 | feature name | ✅ done | def5678 |
 
 ## Detailed report

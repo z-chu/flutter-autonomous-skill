@@ -155,7 +155,7 @@ flowchart LR
 
 **一个交互底座。** iOS（WebDriverAgent / `xcrun simctl`）与 Android（`adb`）的差异全部被 [`mobilecli`](https://github.com/mobile-next/mobilecli) 抹平 —— 方法论写一遍，双端通用。平台细节见 [`references/ios.md`](skills/flutter-autonomous/references/ios.md) 与 [`references/android.md`](skills/flutter-autonomous/references/android.md)。
 
-**硬规则，不靠感觉。** skill 自带 Always/Never 契约：绝不猜元素名（先检视再动手）、绝不改测试降标准来"通过"、绝不没回查就报完成、能自己修的绝不停下要人 —— 并且四条通用红线永远停下：设备物理掉线、花真钱的操作（支付/转账/上链）、密钥或凭证操作、不可逆破坏——项目特有红线写在项目 CLAUDE.md 里，同样生效。
+**硬规则，不靠感觉。** skill 自带 Always/Never 契约：绝不猜元素名（先检视再动手）、绝不改测试降标准来"通过"、绝不没回查就报完成、能自己修的绝不停下要人 —— 并且红线**默认禁止、你事先明确授权才做**：花真钱的操作（支付/转账/上链）、密钥或凭证操作、不可逆破坏；无人值守遇到未授权的直接跳过并标注「需授权」，绝不卡住等人。项目特有红线与授权例外都写在项目 CLAUDE.md 里。
 
 ## 仓库结构
 
@@ -202,7 +202,7 @@ skill 完全**项目无关**：包名、设备、dart-define、日志锚点、�
 <details>
 <summary><b>无人值守安全吗？</b></summary>
 
-skill 有四条**通用**硬红线，命中永远停下等人：设备物理掉线、花真钱的操作（支付、转账、上链交易等）、密钥或凭证操作、不可逆破坏。每个项目的红线不一样——你项目特有的（比如电商的真实下单、区块链的私钥助记词）写在项目 CLAUDE.md 的 `{{IRREVERSIBLE_REDLINES}}` 里，skill 一并遵守。其余（装工具、scaffold 测试、修失败）都是可逆操作，自主完成。建议按 [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) 的"信任阶梯"来：先盯一两次完整闭环，再逐级放手。
+红线采取**默认禁止、授权才做**：花真钱的操作（支付、转账、上链交易等）、密钥或凭证操作、不可逆破坏，除非你**事先明确授权**（本次指令或项目 CLAUDE.md 的 `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` 写明允许哪类、什么范围，如「沙箱支付可下单」），否则一律不做；无人值守中遇到未授权的红线操作不会傻等你回复——跳过并在报告里标注「需授权」，继续下个任务。设备物理掉线则自救一次仍失败才停。你项目特有的红线（比如电商的真实下单、区块链的私钥助记词）写在项目 CLAUDE.md 的 `{{IRREVERSIBLE_REDLINES}}` 里，skill 一并遵守。其余（装工具、scaffold 测试、修失败）都是可逆操作，自主完成。建议按 [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) 的"信任阶梯"来：先盯一两次完整闭环，再逐级放手。
 </details>
 
 <details>
