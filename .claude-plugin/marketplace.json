@@ -1,0 +1,17 @@
+{
+  "name": "flutter-autonomous-skill",
+  "owner": { "name": "z-chu", "email": "zchu8073@gmail.com" },
+  "metadata": {
+    "description": "Autonomous Flutter on-device / simulator testing skill for Claude Code — self-driving implement → test → fix loops on iOS and Android",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "flutter-autonomous",
+      "description": "Run and verify Flutter apps on real devices / simulators autonomously: element-driven interaction via Semantics labels (mobilecli), replayable Patrol assertions by Key, offline fixture tests, screenshot verification, and an unattended implement → test → fix → commit loop. iOS + Android at parity.",
+      "source": "./",
+      "strict": false,
+      "skills": ["./skills/flutter-autonomous"]
+    }
+  ]
+}

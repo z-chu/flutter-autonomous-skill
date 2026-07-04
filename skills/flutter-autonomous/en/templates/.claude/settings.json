@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter:*)",
+      "Bash(flutter run:*)",
+      "Bash(flutter devices:*)",
+      "Bash(flutter emulators:*)",
+      "Bash(dart:*)",
+      "Bash(patrol:*)",
+      "Bash(adb:*)",
+      "Bash(xcrun:*)",
+      "Bash(go-ios:*)",
+      "Bash(mobilecli:*)",
+      "Bash(npx mobilecli:*)",
+      "Bash(claude mcp:*)",
+      "Bash(brew:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(which:*)",
+      "Bash(jq:*)",
+      "Bash(curl:*)",
+      "Bash(open:*)",
+      "Bash(kill:*)",
+      "Bash(ps:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r '.tool_input.file_path // empty'); case \"$f\" in *.dart) dart format \"$f\" >/dev/null 2>&1; result=$(flutter analyze \"$f\" 2>&1 | grep -E 'error|warning|hint' | head -10); [ -n \"$result\" ] && echo \"[analyze] $f\" && echo \"$result\" ;; esac"
+          }
+        ]
+      }
+    ]
+  }
+}
