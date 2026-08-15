@@ -7,7 +7,8 @@
 #
 # 参数:
 #   <deviceId>        mobilecli devices 里的设备 id(脚本不写死设备,运行期传入)
-#   <labelSubstring>  要匹配的子串;对每个节点的 label / text / name 任一做"包含"(不区分大小写)
+#   <labelSubstring>  要匹配的子串;对每个节点的 identifier / label / text / name 任一做"包含"(不区分大小写)
+#                     首选传 identifier(Semantics(identifier:) 那个稳定 id),它不随文案/语言变
 #   --index N         多个匹配时点第 N 个(0 起;默认 0)
 #   --dump-only       只列出所有匹配(label + 中心坐标),不点 —— 先检视再决定点谁
 #
@@ -35,7 +36,8 @@ usage() {
 用法: tap-by-label.sh <deviceId> <labelSubstring> [--index N] [--dump-only]
 
   <deviceId>        mobilecli devices 里的设备 id
-  <labelSubstring>  匹配子串,对 label/text/name 任一做"包含"(不区分大小写)
+  <labelSubstring>  匹配子串,对 identifier/label/text/name 任一做"包含"(不区分大小写)
+                    首选 identifier —— 它不随文案/语言变,label 会
   --index N         多个匹配时点第 N 个(0 起;默认点第 0 个)
   --dump-only       只列出所有匹配(label + 中心坐标),不点
 
@@ -110,19 +112,22 @@ fi
 # ---- 递归匹配 + 算中心 -------------------------------------------------------
 # 输出每个匹配一行 TSV: <cx>\t<cy>\t<area>\t<label>
 #   坐标在前、label 垫底:label 里的换行/制表符不会再撑乱行结构(再叠 @tsv 转义 + 折叠空白)
-#   label 取 label / text / name 第一个非空者(纯展示用)
-#   匹配规则:label/text/name 任一(转小写)包含 needle(转小写)
+#   label 取 label / text / name / identifier 第一个非空者(纯展示用)
+#   匹配规则:identifier/label/text/name 任一(转小写)包含 needle(转小写)
+#     ★ identifier = Flutter `Semantics(identifier:)`(3.19+),映射到 Android resource-id /
+#       iOS accessibilityIdentifier。它是**给自动化的稳定 id,不随文案与语言变**,
+#       而 label 是给人读的可见文案——多语言项目里按 label 定位一改文案就碎。有 identifier 就优先传它。
 #   中心: x + width/2, y + height/2(整数取整,贴近 mobilecli io tap 的像素语义)
 #   排序: 按 rect 面积升序 —— 最小的最可能是叶子控件,而非包含它的行/卡片容器
 MATCHES="$(printf '%s' "$UI_JSON" | jq -r --arg needle "$NEEDLE" '
   ($needle | ascii_downcase) as $q
   | [ .. | objects | select(has("rect"))
       | . as $n
-      | ( [ ($n.label // ""), ($n.text // ""), ($n.name // "") ]
+      | ( [ ($n.identifier // ""), ($n.label // ""), ($n.text // ""), ($n.name // "") ]
           | map(ascii_downcase) ) as $hay
       | select( any($hay[]; contains($q)) )
       | {
-          label: ( ($n.label // $n.text // $n.name // "(无 label)")
+          label: ( ($n.label // $n.text // $n.name // $n.identifier // "(无 label)")
                    | tostring | gsub("\\s+"; " ") ),
           cx:   ( ($n.rect.x + ($n.rect.width  / 2)) | floor ),
           cy:   ( ($n.rect.y + ($n.rect.height / 2)) | floor ),
@@ -146,7 +151,7 @@ if [ -z "$MATCHES" ]; then
   echo "  2) 纯 canvas 绘制(图表内部等),无 Semantics 包裹 —— 回代码补 Semantics(label:)," >&2
   echo "     或对这种节点退回截图量坐标盲点(末选)。" >&2
   echo "  3) 子串拼写/大小写无关但内容不符 —— 先全量检视:" >&2
-  echo "       mobilecli dump ui --device '$DEVICE' --format json | jq -r '.. | objects | select(has(\"rect\")) | .label // .text // .name // empty'" >&2
+  echo "       mobilecli dump ui --device '$DEVICE' --format json | jq -r '.. | objects | select(has(\"rect\")) | [.identifier, .label, .text, .name] | map(select(. != null)) | @tsv'" >&2
   exit 4
 fi
 

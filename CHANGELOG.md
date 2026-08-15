@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`Semantics(identifier:)` in the code contract, and in the matcher.** The
+  contract taught `Semantics(label:)` only — but a label is human-readable
+  visible copy, so rewording a string or switching locale breaks anything
+  locating by it, which a multi-language app does routinely. `identifier`
+  (Flutter 3.19+) is the stable id meant for automation, mapping to Android's
+  resource-id and iOS's accessibilityIdentifier. `dump ui` already returned the
+  field and `tap-by-label.sh` was ignoring it; it now matches on
+  `identifier / label / text / name`, identifier first, while still displaying
+  the label so a human scanning `--dump-only` still recognises the row. Reuse
+  the name you gave `Key` — one naming feeds both Patrol and element-driven
+  interaction. It also enters the locator priority list, second only to `Key`.
+  (Prompted by reviewing Maestro, which recommends the same field; Maestro
+  itself stays out — living outside the Flutter runtime, it cannot see `Key`s
+  at all.)
+
 - **A worked example of expanding acceptance criteria**, in the autonomous loop
   section. Step one of the loop had always said "self-expand into 3–8 assertable
   items, tagged by layer", but never showed what that looks like — and it is the
@@ -119,7 +134,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **"Re-check" is now a leading word, not eight phrasings of the same idea.** One
+  concept — prove the result with an independent command instead of inferring it
+  from having run the action — was spelled out at eight sites in five different
+  ways: "re-verify with an independent command", "confirm with outside evidence",
+  "compare and confirm", "don't treat 'I ran kill' as 'the app is closed'". It is
+  defined once now, beside the green zone it sits next to in spirit, and every
+  site reuses the word. The word does the anchoring the restatements were trying
+  to do, in one token: 6 uses before, 23 after, while the document got shorter.
+  Its boundary is stated with it, because two words were quietly competing for
+  the same job: a re-check takes machine-decidable evidence (a dump comparison,
+  the foreground package, a return code), while eyeballing a screenshot for how
+  something looks is *screenshot verification* — both required, neither a
+  substitute for the other. Everything that verifies state now says "re-check";
+  everything that judges appearance still says "verify".
+
+- **The Rules checklist points instead of restating.** It had drifted into a
+  compressed rewrite of the body, which meant every behaviour change had to be
+  written twice per language — the last batch of five changes touched twenty
+  edit sites for five ideas. Each rule is now its bar plus a section reference,
+  so the mechanism has one home and the checklist can be scanned rather than
+  read.
+
+- **The anti-pattern list went from nine prohibitions to two.** Eight of the nine
+  were the exact inverse of an Always rule already stated positively above, so
+  they paid tokens to drag the forbidden behaviour into context and say nothing
+  new. What remains is the pair with no positive form to point at: reporting a
+  result without re-checking it, and passing offline-green off as UI-verified.
+  Elsewhere the same edit ran through the prose — "never write a device id into
+  any file" became "a device id lives only inside this run", "don't chase parity"
+  became "run the platforms the project actually ships". The four red lines keep
+  their prohibitions: a hard guardrail is the one case that earns one.
+
 ### Removed
+
+- **The reassurance that a missing memory mechanism is fine.** "Re-detecting
+  takes seconds; don't require the user to configure anything" was written for
+  the reader, not the agent: the rationale changes no behaviour, and the one
+  instruction buried in it — don't ask for configuration — is already stated
+  twice above it ("project-specific values are never hardcoded... it runs
+  without them", "auto-detect, don't ask, don't hardcode").
 
 - **The project `CLAUDE.md` template, and with it the idea that this skill needs
   configuring at all.** The author — its heaviest user — had never once filled it
