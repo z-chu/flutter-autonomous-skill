@@ -4,7 +4,7 @@ license: MIT
 compatibility: Requires Flutter SDK; Android via adb (mac/Linux); iOS via Xcode/simctl (macOS only); mobilecli/patrol_cli auto-installed by scripts/bootstrap.sh
 metadata:
   author: z-chu
-  version: "1.0.0"
+  version: "1.1.0"
 description: Flutter 真机/模拟器自主运行与自动化测试验证(iOS + Android 对等)。用于:把 App 跑到设备/模拟器上看效果、模拟点击/输入/滑动、截图视觉核验、抓日志定位、E2E/集成回归(Patrol 按 Key)、离线 fixture 秒级单测,或自主跑「实现→测试→修复→提交」闭环。Autonomous Flutter on-device/simulator run, tap/screenshot/log verification, Patrol E2E regression.
 ---
 

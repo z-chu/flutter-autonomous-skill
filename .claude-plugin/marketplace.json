@@ -3,7 +3,7 @@
   "owner": { "name": "z-chu", "email": "zchu8073@gmail.com" },
   "metadata": {
     "description": "Autonomous Flutter on-device / simulator testing skill for Claude Code — self-driving implement → test → fix loops on iOS and Android",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "plugins": [
     {
