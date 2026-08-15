@@ -123,7 +123,7 @@ Gradle：  {{TOOLCHAIN}}    # 如 wrapper 锁定版本
 4. [ ] **截图视觉确认**：`mobilecli screenshot` 后 Read 核验，无溢出/错位/空白（golden 已覆盖的不必重复肉眼看）
 5. [ ] **按提交策略处理**（见下「提交策略」`{{COMMIT_POLICY}}`：增量提 / 最后提 / 不提——选「不提」则跳过此关）
 
-> **先问「这必须上设备吗」**：能离线证明的逻辑、交互、视觉都别上真机；能用日志（连接/状态机）证明的别只靠截图；控件找不到/布局不对先查 VM Service 的 widget 树（带源码行号）再截图。分层细节见 skill「验证分层」与 `references/vm-service.md`。
+> **第 3、4 关不可跳**：`flutter test` 全绿**不等于** UI 对（离线层跑在无头环境，不经真实渲染）。改了 UI 就必须上设备真跑 + 截图核验；纯逻辑 bug 才用离线层秒级定位、别占真机时间。控件找不到/布局不对先查 VM Service 的 widget 树（带源码行号）再截图。分层细节见 skill「验证分层」与 `references/vm-service.md`。
 
 ---
 

@@ -157,7 +157,11 @@ flowchart LR
 | 设备 | ⑥ Patrol 按 `Key` | 可复跑回归断言，出 pass/fail 进 CI | 在设备上 |
 | 设备 | ⑦ 日志取证 | 连接 / 状态机 / gating（比截图硬） | 取证 |
 
-其中 ②③ 最容易被漏 —— "点一下看它变没变""看起来对不对"这类验证，默认心智容易划给设备层，其实在离线层是**毫秒级、确定性**的。golden 失败给的是 `0.32%, 3619px diff` 这种数字加一张**只画变化区域**的图，比盯整屏截图又快又准。
+**主次别搞反**：④⑤⑥⑦ 才是这个 skill 存在的理由 —— 把 App 真跑起来、自己点、自己看。①②③ 的作用是**上设备前先筛掉不值得占用设备时间的东西**（纯逻辑 bug 不该花 30 分钟真机时间定位；反复跑的静态视觉回归交给 golden，它给的是 `0.32%, 3619px diff` 这种数字加一张只画变化区域的图）。
+
+> **离线全绿 ≠ UI 没问题** —— 无头环境不经真实渲染管线。改了 UI 就必须上设备真跑并截图核验，skill 里把「拿离线测试绿了当 UI 验过了」列为头号反模式。
+>
+> 反过来也一样：**纯写单测不需要这个 skill**，直接 `flutter test` 就行 —— 杀鸡不用牛刀。
 
 **一个交互底座。** iOS（WebDriverAgent / `xcrun simctl`）与 Android（`adb`）的差异全部被 [`mobilecli`](https://github.com/mobile-next/mobilecli) 抹平 —— 方法论写一遍，双端通用。平台细节见 [`references/ios.md`](skills/flutter-autonomous/references/ios.md) 与 [`references/android.md`](skills/flutter-autonomous/references/android.md)。
 
