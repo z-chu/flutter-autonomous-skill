@@ -1,6 +1,6 @@
 # iOS 对等指南(模拟器优先 → WebDriverAgent 真机)
 
-> 本文是 keystone（`../SKILL.md`）的 iOS 平台展开。术语、硬原则、闭环顺序、Key+Semantics 双标、验证四层、kill≠force-stop、自修复≤5 轮、commit 规范——**以 keystone 为准，本文不复述**，只补 iOS 落地差异。
+> 本文是 keystone（`../SKILL.md`）的 iOS 平台展开。术语、硬原则、闭环顺序、Key+Semantics 双标、验证分层、kill≠force-stop、自修复≤5 轮、commit 规范——**以 keystone 为准，本文不复述**，只补 iOS 落地差异。
 > 占位符：`<udid>`（模拟器/真机的 UDID）、`<bundleId>`（应用包标识，从项目 `CLAUDE.md` 或 `ios/Runner.xcodeproj/project.pbxproj` 的 `PRODUCT_BUNDLE_IDENTIFIER` 读，**绝不写死**）、`<deviceId>`（mobilecli 视角的设备 id，模拟器即 UDID）、`<deeplink>`。
 > **平台前提：iOS 工具链只在 macOS 上存在。Linux 跑这套自动化时只能跑 Android，iOS 部分整段跳过（见文末）。模拟器是 mac 专属。**
 
@@ -79,7 +79,7 @@ mobilecli device url "<deeplink>" --device <udid>
 xcrun simctl io <udid> screenshot /path/shot.png
 mobilecli screenshot --device <udid> -o /path/shot.png      # 等价
 
-# 日志流（验证四层里的"日志"层——连接/状态机/gating 最硬证据）
+# 日志流（验证分层里的⑦"日志"层——连接/状态机/gating 最硬证据）
 xcrun simctl spawn <udid> log stream --level debug --predicate 'processImagePath CONTAINS "Runner"'
 # Flutter 的 print/debugPrint 也可走 `flutter logs`（跨端统一）
 ```
@@ -185,6 +185,47 @@ WDA 取设备无障碍树后，**只保留**满足以下两条的元素：
 
 ---
 
+### 3.2 确定性开关（模拟器专属，截图/golden 可比的前提）
+
+模拟器可以把「每次跑都不一样」的系统外观钉死，这样截图之间、截图与基线之间才可比。**这些都是可逆的模拟器状态，属绿区，但收尾同样要清掉。**
+
+```bash
+# 状态栏钉死：时间/信号/电量固定，否则每张截图的状态栏都不同
+xcrun simctl status_bar <udid> override --time "9:41" --batteryLevel 100 \
+  --cellularBars 4 --wifiBars 3 --dataNetwork wifi
+xcrun simctl status_bar <udid> list      # 回查当前 override
+xcrun simctl status_bar <udid> clear     # 收尾：清掉
+
+# 系统级浅/深色
+xcrun simctl ui <udid> appearance dark|light
+xcrun simctl ui <udid> appearance        # 不带参数 = 读当前值（改之前先读，用来还原）
+
+# 录像留证（无人值守时留一份可回看的过程）
+xcrun simctl io <udid> recordVideo --codec h264 /path/run.mov   # Ctrl-C 结束
+```
+
+要点：
+
+- **状态栏 override 是 iOS 侧做视觉核验/golden 对比的前置**：不钉死时间和信号，两张截图永远有差异，diff 全是噪声。
+- **深色模式核验优先用 `vm-service.md` §3.5 的 `brightnessOverride`**——那条只作用于 App 自身、重启即失效、不用还原；`simctl ui appearance` 改的是整台模拟器的状态，**改之前先读原值，收尾写回**。
+- **真机没有这些**：`status_bar override` / `ui appearance` 都是模拟器专属。真机上的视觉核验只能接受状态栏差异，或裁掉状态栏区域再比。
+- 录像不是给 AI 看的（读不了视频）——它是留给**人**早上回看的证据。要让 AI 看中间过程，用 `ffmpeg -i run.mov -vf fps=1 frame_%03d.png` 抽帧后挑几张 Read。
+
+**iOS 的日志窗口**（对应 `android.md` §4.1，把日志切成以动作为单位的窗口再断言）：
+
+```bash
+# 长驻流式（另起后台，别阻塞主线程）
+xcrun simctl spawn <udid> log stream --style json \
+  --predicate 'processImagePath CONTAINS "Runner"' > win.log
+# 或：执行动作后回看最近一小段（不用长驻）
+xcrun simctl spawn <udid> log show --last 30s --style json \
+  --predicate 'processImagePath CONTAINS "Runner"' > win.log
+```
+
+`--style json` 出机器可读结构，比解析人类可读日志稳；App 侧配合 `dev.log('{"evt":...}', name: 'e2e')` 打单行 JSON 锚点，断言用 jq。
+
+---
+
 ## 4. iOS vs Android 能力差异（避免用错命令）
 
 | 能力 | iOS 真机/模拟器 | 替代做法 |
@@ -242,9 +283,12 @@ mobilecli apps terminate <bundleId> --device <udid>        # 2) 真关 App
 #    等价：xcrun simctl terminate <udid> <bundleId>
 # 3) 同设备别项目残留 App 也 terminate
 mobilecli apps foreground --device <udid>                  # 4) 回查前台，确认不是残留 App
+xcrun simctl status_bar <udid> clear                       # 5) 清掉 §3.2 的状态栏 override
+xcrun simctl status_bar <udid> list                        #    回查：已无 override
+#    §3.2 若改过 ui appearance，一并写回原值
 ```
 
-**宣布"测完/停好"前用独立命令回查真实状态**（`apps foreground` / `simctl list devices booted`），别拿"我执行了 terminate"当"App 关了"——这是 keystone 的"不验证不报完成"硬原则。
+**宣布"测完/停好"前用独立命令回查真实状态**（`apps foreground` / `simctl list devices booted`），别拿"我执行了 terminate"当"App 关了"——这是 keystone 的"不验证不报完成"硬原则。**改过的模拟器系统状态（状态栏 override、appearance）同样要复原 + 回查**，与 `android.md` §4.2 的动画开关同级。
 
 ---
 

@@ -1,11 +1,21 @@
-# 离线 / fixture 秒级测试层(下层)
+# 离线秒级测试层(无设备的三层)
 
-> 本文是 `flutter-autonomous` 的「验证四层」的**第①层**深度展开,术语/原则以 [SKILL.md](../SKILL.md) 为准,不与其矛盾。
-> SKILL 已讲清「闭环顺序」「四红线」「自修复≤5轮」「断言失败修实现」等;这里只补 SKILL 没展开的**离线层怎么造数据、怎么注入、放哪、怎么跑**。
+> 本文是 [SKILL.md](../SKILL.md)「验证分层」里 **A. 离线层(①②③)** 的深度展开,术语/原则以 SKILL 为准,不与其矛盾。
+> SKILL 已讲清「闭环顺序」「四红线」「自修复≤5轮」「断言失败修实现」等;这里只补 SKILL 没展开的**怎么写、怎么造数据、放哪、怎么跑**。
+
+三层各管一段,**一条 `flutter test` 全跑完**:
+
+| 层 | 管什么 | 本文位置 |
+|---|---|---|
+| ① **纯逻辑 fixture** | 解码/解析/数值/状态机/错误处理 | §3 四策略 |
+| ② **widget test** | 控件交互、页面跳转、表单、条件渲染 | §4 |
+| ③ **golden + a11y guideline** | 视觉回归矩阵、无障碍契约自检 | §5 |
+
+> **最常被漏的是 ②③**。默认心智容易是"逻辑用单测、UI 就得上设备"——不对:大量"点一下看它变没变""看起来对不对"的验证,在 ②③ 里是**毫秒级、无设备、确定性**的。把它们放上设备,是拿几十分钟设备时间换本可秒级拿到的结论。
 
 ---
 
-## 1. 为什么真机之外还要这一层(两层互补)
+## 1. 为什么设备之外还要这几层(两块互补)
 
 真机层(元素驱动 + Patrol + 截图)的本质是**集成 + 视觉**:慢、要设备、且**不确定**(联网、外部数据会变、有时序、有动画)。它证明不了、也不该用来证明这类问题:
 
@@ -17,10 +27,10 @@
 
 | 层 | 锁什么 | 特征 |
 |---|---|---|
-| **离线 / fixture 层**(本文) | 纯逻辑:解码 / 解析 / 数值 / 状态机 / 错误处理 | 把外部世界冻成确定性输入,秒级、无设备、每次 push 都能跑 |
-| **真机 / Patrol 层**(SKILL 主体) | 集成 + 视觉:交互、跳转、渲染、连接、布局 | 需设备、慢、验真机才能验的东西 |
+| **离线层**(本文 ①②③) | 纯逻辑 + **控件交互/跳转** + **视觉回归/无障碍契约** | 把外部世界冻成确定性输入,秒级、无设备、每次 push 都能跑 |
+| **设备层**(SKILL 主体) | 只剩:真实渲染、系统集成、真实数据、真机专属能力 | 需设备、慢、验真机才能验的东西 |
 
-口诀:**能离线证明的逻辑,绝不上真机**。把真机时间留给只有真机能验的集成与视觉。
+口诀:**能离线证明的,绝不上真机**。注意这句的范围比直觉大——不只是"逻辑",**交互和视觉的大部分也能离线证明**。真机时间只留给离线层够不着的那部分。
 
 ---
 
@@ -30,9 +40,11 @@
 
 ```
 flutter analyze(零警告)
-  → flutter test / dart test   ← 【离线层:本文】秒级、确定性、无设备
-        └─ 挂 = 纯逻辑 bug,【不上设备,直接修】
-  → 确认设备在线 → 元素驱动(一次性 dump→tap)
+  → flutter test / dart test   ← 【离线层 ①②③:本文】秒级、确定性、无设备
+        ├─ ① 纯逻辑挂 = 逻辑 bug        ┐
+        ├─ ② 交互/跳转挂 = 行为 bug      ├─ 全都【不上设备,直接修】
+        └─ ③ golden/guideline 挂 = 视觉或无障碍契约 bug ┘
+  → 确认设备在线 → VM Service 取证 / 元素驱动(一次性 dump→tap)
   → patrol test(可复跑断言,进 CI)
 ```
 
@@ -41,7 +53,7 @@ flutter analyze(零警告)
 
 ---
 
-## 3. 四策略(按"被测对象吃什么"选)
+## 3. 第①层:纯逻辑 fixture 的四策略(按"被测对象吃什么"选)
 
 被测对象吃外部 JSON/帧 → **A**;吃二进制字节流 → **B**;是依赖外部 IO 的 service,要测控制流/错误处理 → **C**;只是想探查真实数据分布、不进回归 → **D**。
 
@@ -207,7 +219,117 @@ test('超时 → inconclusive', () async {
 
 ---
 
-## 4. 目录约定 & 怎么跑
+## 4. 第②层:widget test —— 把"上设备点一下"搬到离线
+
+**何时用**:验证**控件交互、页面跳转、表单校验、条件渲染、空/错/加载态**。这些默认容易被划给设备层,但它们绝大多数不依赖真实渲染管线,`testWidgets` 里毫秒级就能证。
+
+**判据(拿这条切分设备层与本层)**:问一句「这件事**必须**要真实的 GPU 渲染 / 真实的系统能力 / 真实的后端数据吗?」
+
+| 答案 | 归属 |
+|---|---|
+| 不必须(点了之后状态/文案/路由变没变、禁用态对不对、错误提示出没出) | **本层 ②** |
+| 必须(真实渲染观感、原生插件/相机/推送、真实网络与账号、平台差异) | 设备层 |
+
+```dart
+testWidgets('点提交后跳到首页', (tester) async {
+  await tester.pumpWidget(const MyApp());
+  await tester.enterText(find.byKey(const Key('email_input')), 'a@b.com');
+  await tester.tap(find.byKey(const Key('submit_btn')));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const Key('home_screen')), findsOneWidget);
+});
+```
+
+要点:
+- **和 Patrol 共用同一套 `Key`**——SKILL 的代码契约(`Key` + `Semantics` 双标)在这层直接兑现,不用另起一套定位方式。
+- `pumpAndSettle()` 跑完所有动画帧;不确定时用它,别手写 `Duration` 等。
+- **屏幕尺寸可控**:`tester.view.physicalSize` / `devicePixelRatio` 设成目标机型,配 `addTearDown(tester.view.reset)` 复原——**小屏溢出这类问题在这层就能复现**,不用找真机。
+- 网络/存储依赖用第①层的 `forTesting` 注入(策略 C)顶掉,别让 widget test 碰真实 IO。
+- **失败信息比设备层好读**:直接给 `found 0 widgets` + 当时的 widget 树,不用截图猜。
+
+---
+
+## 5. 第③层:golden 矩阵 + a11y guideline —— 视觉与契约的机器判定
+
+### 5.1 golden:视觉回归别再靠肉眼看截图
+
+**为什么值得**:靠人/AI 盯整屏截图判断"看起来对不对"既慢又不可靠。golden 给的是**量化数字 + 只画变化区域的图**:
+
+```
+Golden "goldens/home_light_x1.0.png": Pixel test failed, 0.32%, 3619px diff detected.
+Failure feedback can be found at .../test/failures
+```
+
+失败时落**四张产物**,`*_isolatedDiff.png` 是最该看的一张——**只画变化的像素**,一眼定位改了哪块,比读整屏截图省得多:
+
+| 产物 | 是什么 |
+|---|---|
+| `*_masterImage.png` | 基线 |
+| `*_testImage.png` | 本次实际 |
+| `*_isolatedDiff.png` | **只有变化区域**(优先 Read 这张) |
+| `*_maskedDiff.png` | 变化处叠在实际图上 |
+
+**矩阵化**:一次 `flutter test` 就能跑「主题 × 字号 × 屏幕尺寸」的组合,**几秒钟覆盖手工要跑几十遍的核验**:
+
+```dart
+for (final brightness in [Brightness.light, Brightness.dark]) {
+  for (final scale in [1.0, 1.5]) {
+    testWidgets('golden ${brightness.name}_x$scale', (tester) async {
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+        child: MaterialApp(theme: ThemeData(brightness: brightness), home: const HomeScreen()),
+      ));
+      await tester.pumpAndSettle();
+      await expectLater(find.byType(HomeScreen),
+          matchesGoldenFile('goldens/home_${brightness.name}_x$scale.png'));
+    });
+  }
+}
+```
+
+用法与坑:
+- **建基线**:`flutter test --update-goldens`。**基线是要提交进仓库的资产**,和代码一起 review——基线变了就是视觉变了,diff 里看得见。
+- **`--update-goldens` 是"接受当前样子"**,不是"修复失败"。失败时**先看 `isolatedDiff` 判断这次变化是不是预期的**,是才更新基线;直接无脑 `--update-goldens` = SKILL 说的「改测试绕过断言」。
+- **字体渲染跨机器会有差异**:基线在哪台机器/哪个 CI 镜像生成,就在同类环境比对,否则会出现无意义的整屏 diff。
+- 固定 `devicePixelRatio` 和 `physicalSize`,别让默认值随环境漂。
+
+### 5.2 a11y guideline:让"控件天生可测"这条契约自动被拦住
+
+SKILL 的代码契约要求可交互控件包 `Semantics`。这条**不用靠人工自查**——`flutter_test` 自带四条可断言的 guideline,秒级、无设备:
+
+```dart
+testWidgets('无障碍契约自检', (tester) async {
+  final handle = tester.ensureSemantics();          // 必须先开,结束后 dispose
+  await tester.pumpWidget(const HomeScreen());
+  await expectLater(tester, meetsGuideline(labeledTapTargetGuideline));   // 可点控件必须有 label
+  await expectLater(tester, meetsGuideline(androidTapTargetGuideline));   // 热区 ≥ 48x48
+  await expectLater(tester, meetsGuideline(iOSTapTargetGuideline));       // 热区 ≥ 44x44
+  await expectLater(tester, meetsGuideline(textContrastGuideline));       // 对比度符合 WCAG
+  handle.dispose();
+});
+```
+
+失败信息直接可操作(实测形态):
+
+```
+expected tappable node to have semantic label, but none was found.
+  SemanticsNode#6(Rect.fromLTRB(360.0, 320.5, 440.0, 400.5), actions: [tap])
+
+expected tap target size of at least Size(48.0, 48.0), but found Size(20.0, 20.0)
+
+Expected contrast ratio of at least 4.5 but found 1.29 for a font size of 14.0.
+```
+
+**为什么这条对本 skill 特别重要**:`labeledTapTargetGuideline` 正好判的就是「没包 `Semantics` 的 `GestureDetector`/`InkWell`」——那是 SKILL 里 `dump ui` 列不出控件的**根因**。加上这条断言后,该问题在离线层就被拦住,**不会等到上了设备才发现"这个控件点不到"**。等于把元素驱动的前提条件变成了 CI 门禁。
+
+> `ensureSemantics()` 只在**测试里**需要;**别为了这个去改 App 代码**——在 App 里调 `SemanticsBinding.instance.ensureSemantics()` 对 `dump ui` 没有任何改善(实测,见 `vm-service.md` §5)。
+
+---
+
+## 6. 目录约定 & 怎么跑
 
 ```
 tools/
@@ -218,21 +340,38 @@ test/
   <模块>/_fixtures.dart           # 策略 B:字节 fixture 构造器(toBytes)
   <模块>/fixtures/<来源>/*.json   # 策略 A:真实数据 JSON fixture,按来源分目录
   <模块>/xxx_test.dart            # 用 fixture / forTesting 的单测(策略 A/B/C)
+  <模块>/xxx_widget_test.dart     # 第②层:交互/跳转(testWidgets)
+  goldens/*.png                   # 第③层:视觉基线,【要提交进仓库】
+  failures/                       # golden 失败产物,【加进 .gitignore】
 ```
 
 跑:
-- `flutter test` —— 跑全部(含需要 flutter binding 的)。
+- `flutter test` —— 跑全部(①②③ 一把梭,含需要 flutter binding 的)。
 - `dart test` —— 跑**纯 Dart 部分**(不依赖 flutter binding 的解码 / 解析 / 数值),**更快**,优先用于纯逻辑模块。
+- `flutter test --update-goldens` —— **只在确认视觉变化符合预期后**才跑(见 §5.1)。
+
+**自主跑时用机读输出,别解析控制台文本**:
+
+```bash
+flutter test --reporter json                     # 机器可读的结果流
+flutter test --file-reporter json:reports/t.json # 结果落文件,跑完再解析
+flutter test --coverage                          # 出 coverage/lcov.info,用来看【哪里还没测到】
+```
+
+`--coverage` 在自主循环里的用法:不是为了凑覆盖率数字,而是**回答"我还有哪条分支没验过"**,据此决定下一条测试写什么——比拍脑袋补测试准。
 
 CI 友好:无需设备、确定性、秒级 —— 适合每次 push 都跑,把真机验证留给关键路径 / 夜间。
 
 ---
 
-## 5. 硬原则小结
+## 7. 硬原则小结
 
-1. **依赖坏了不崩、不漏内部异常**:外部抛异常 / 超时都收敛成领域内中性状态(`inconclusive`),不外泄内部错、不抛、不当 `failed`(策略 C)。
-2. **fixture 只抽断言要用的最小字段子集**,不存全量;抓不到给可操作报错(策略 A)。
-3. **字节 fixture 每个 add 注释字节偏移区间**,对着协议表写(策略 B)。
-4. **金额 / 大整数用 `BigInt`,不用 `double`**(策略 B)。
-5. **probe ≠ 回归**:探查脚本拿到结论写进注释,不留在测试套件里(策略 D)。
-6. **离线层先全绿再上设备**;`flutter test` 挂 = 纯逻辑 bug,不上设备直接修。
+1. **先问"这必须上设备吗"**:交互能 ② 证的别上设备,视觉能 ③ 证的别靠肉眼看截图。真机时间只给离线层够不着的部分。
+2. **`--update-goldens` 不是修复手段**:失败先读 `isolatedDiff` 判断变化是否预期,是才更新基线——无脑更新等于改测试绕过断言。
+3. **`meetsGuideline(labeledTapTargetGuideline)` 是元素驱动的前置门禁**:让"控件没包 Semantics"在离线层就挂,别等上了设备才发现点不到。
+4. **依赖坏了不崩、不漏内部异常**:外部抛异常 / 超时都收敛成领域内中性状态(`inconclusive`),不外泄内部错、不抛、不当 `failed`(策略 C)。
+5. **fixture 只抽断言要用的最小字段子集**,不存全量;抓不到给可操作报错(策略 A)。
+6. **字节 fixture 每个 add 注释字节偏移区间**,对着协议表写(策略 B)。
+7. **金额 / 大整数用 `BigInt`,不用 `double`**(策略 B)。
+8. **probe ≠ 回归**:探查脚本拿到结论写进注释,不留在测试套件里(策略 D)。
+9. **离线层先全绿再上设备**;`flutter test` 挂 = 逻辑/契约 bug,不上设备直接修。

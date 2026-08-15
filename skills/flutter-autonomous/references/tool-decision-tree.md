@@ -1,13 +1,14 @@
 # 工具选型:mobilecli / mobile-mcp / mobilewright / Patrol / adb·simctl 何时用
 
 > 本文只讲**选型边界**——为什么有这几把工具、各自能做不能做什么、什么场景挑哪把。
-> 方法论(元素驱动优先于盲点、Key+Semantics 双标、验证四层、收尾回查)在 `SKILL.md`,这里不复述。
+> 方法论(元素驱动优先于盲点、Key+Semantics 双标、验证分层、收尾回查)在 `SKILL.md`,这里不复述。
 
 ---
 
 ## 一句话先记住
 
-- **自主跑、即时交互/探索/诊断** → `mobilecli`(已装二进制,免 MCP/重启,这是默认手)。
+- **自主跑、即时交互**(要点、要输入、要滑) → `mobilecli`(已装二进制,免 MCP/重启,这是默认手;**只有它能点**)。
+- **诊断/取证**(控件在不在、哪行代码画的、布局尺寸对不对、这步报没报错) → **VM Service**(`flutter run` 已开的通道,一行 curl,**不依赖无障碍树** → `vm-service.md`)。
 - **想用 MCP 工具流(已注册)** → `mobile-mcp`(同引擎换皮,截图省 token,但改配置下次会话才生效)。
 - **要可复跑的 Flutter 断言、进 CI** → `Patrol`(Dart VM 按 Key,iOS/Android 都稳——Flutter 唯一可靠确定性路径)。
 - **要 TS 可复跑脚本 / 系统级 / 跨 app / 内嵌 webview** → `mobilewright`(Playwright 风,但 **Flutter ⏳ 未正式支持**)。
@@ -140,7 +141,8 @@ claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest
 
 | 你要做的事 | 挑这把 | 因为 |
 |---|---|---|
-| 自主跑里**即时交互 / 探索 / 诊断**(点一下看效果、导航、抓崩溃、看前台) | **mobilecli** | 已装二进制,免 MCP/重启,闭环最短 |
+| 自主跑里**即时交互 / 探索**(点一下看效果、导航、抓崩溃、看前台) | **mobilecli** | 已装二进制,免 MCP/重启,闭环最短;**唯一能给可点坐标的** |
+| **诊断取证**:控件在不在 / Key 拼对没 / 是哪行代码画的 / 布局真实尺寸 / 这步报没报错 | **VM Service** | `flutter run` 已开的通道,一行 curl;**不依赖 Semantics**,widget 树直接带 `Key` 和源码行号 → `vm-service.md` |
 | 想走 **MCP 工具流**(已注册 / 要截图省 token / 与别的 MCP 编排) | **mobile-mcp** | 同引擎换皮;但改配置下次会话才生效、无前台校验/无 fs |
 | **Flutter 的可复跑 UI/集成断言**(回归、CI、要 pass/fail) | **Patrol** | Dart VM 按 Key,Flutter 唯一可靠确定性路径 |
 | **TS 可复跑脚本 / 系统级 / 跨 app / 内嵌 webview**(且目标非 Flutter canvas) | **mobilewright** | Playwright 风 locator + auto-wait + reporter + CI;**Flutter ⏳ 不支持** |
@@ -149,3 +151,5 @@ claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest
 | **纯 canvas 盲点**(图表内部等无任何 Semantics) | **adb**(Android)/ **simctl·WDA**(iOS) | 末选;只要有 Semantics 一律走元素驱动 |
 
 > 顺序心法:**能 mobilecli 就别起 MCP,能元素驱动就别盲点,要回归就上 Patrol,Flutter 断言永远不押 mobilewright。**
+>
+> 再加一句(与上面同等重要):**要点用 mobilecli,要证据用 VM Service,要回归用 Patrol**——这三者不是替代关系,是分工。找不到控件、布局不对、疑似报错时先查 VM Service,别一上来就截图肉眼找;而**能离线证明的交互与视觉,连设备都不该上**(见 `offline-test-layer.md` 的 widget test / golden 两层)。

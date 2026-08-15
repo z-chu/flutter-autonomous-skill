@@ -54,6 +54,8 @@ flutter devices              # 兜底；含模拟器/真机
 
 抓法（平台细节见 skill 的 `references/{android,ios}.md`）：`adb logcat -s flutter -d | tail -200`（Android）/ `flutter logs`（通用）/ iOS 模拟器 `xcrun simctl spawn <udid> log stream`。同设备多个 Flutter App 的 `I/flutter` 都进 logcat，**先认目标 App PID** 再读。
 
+**断言时把日志切成窗口**（清缓冲 → 执行一个动作 → 只读这一步的日志），否则分不清是这一步产生的还是上一步残留的——见 skill `references/android.md` §4.1。App 侧建议打**单行 JSON 锚点**（`dev.log('{"evt":"...","...":...}', name: 'e2e')`），断言用 `jq` 而不是正则猜文本。错误类断言更硬的做法是 VM Service 的 `errorsSinceReload`（`references/vm-service.md` §4），一次覆盖所有错误类型。
+
 ---
 
 ## 工具链约束
@@ -112,13 +114,16 @@ Gradle：  {{TOOLCHAIN}}    # 如 wrapper 锁定版本
 
 按顺序逐关过，**前一关不绿不进下一关**（省设备时间）：
 
-1. [ ] **离线 fixture 绿**：`flutter test`（纯逻辑/解析/状态机用 fixture+mock 秒级验，无设备）
+1. [ ] **离线层全绿**：`flutter test` —— 一条命令跑完三样，**都不需要设备**：
+       - 纯逻辑（解析/数值/状态机/错误处理）用 fixture+mock
+       - 交互/跳转/表单/条件渲染用 `testWidgets`
+       - 视觉用 golden 矩阵（主题×字号）、无障碍契约用 `meetsGuideline`
 2. [ ] **静态零警告**：`flutter analyze` 零 error / 零 warning
 3. [ ] **目标设备 Patrol 全绿**：`patrol test -t integration_test/<feature>_test.dart --device <运行时取的 id>`
-4. [ ] **截图视觉确认**：`mobilecli screenshot` 后 Read 核验，无溢出/错位/空白
+4. [ ] **截图视觉确认**：`mobilecli screenshot` 后 Read 核验，无溢出/错位/空白（golden 已覆盖的不必重复肉眼看）
 5. [ ] **按提交策略处理**（见下「提交策略」`{{COMMIT_POLICY}}`：增量提 / 最后提 / 不提——选「不提」则跳过此关）
 
-> 能离线证明的逻辑别上真机；能用日志（连接/状态机）证明的别只靠截图。分层细节见 skill「验证四层」。
+> **先问「这必须上设备吗」**：能离线证明的逻辑、交互、视觉都别上真机；能用日志（连接/状态机）证明的别只靠截图；控件找不到/布局不对先查 VM Service 的 widget 树（带源码行号）再截图。分层细节见 skill「验证分层」与 `references/vm-service.md`。
 
 ---
 

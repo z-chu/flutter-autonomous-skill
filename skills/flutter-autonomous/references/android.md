@@ -83,7 +83,7 @@ Flutter 的 `print`/`debugPrint` 走 `I/flutter` tag：
 "$ADB" -s <id> logcat -c                    # 跑用例前清旧日志，避免读到上轮残留
 ```
 
-按 keystone「验证四层·第④层取证」grep 关键锚点（具体锚点串从项目 `CLAUDE.md` 读，下面是通用形态）：
+按 keystone「验证分层·⑦日志取证」grep 关键锚点（具体锚点串从项目 `CLAUDE.md` 读，下面是通用形态）：
 
 ```bash
 # 连接类：WS/HTTP 连上的 URL、握手成功标志
@@ -96,6 +96,88 @@ Flutter 的 `print`/`debugPrint` 走 `I/flutter` tag：
 
 - 长驻看日志另起后台 Bash 轮询，别阻塞主线程（参考 keystone 的 `until grep` 模式）。
 - 连接/状态/gating 这类「发生了没发生」的判断**用日志，不用截图**——截图只证视觉/布局。
+
+---
+
+## 4.1 用「日志窗口」做断言（比全量 grep 硬）
+
+全量 `logcat | grep` 的问题是分不清「这条日志是这一步产生的，还是上一步残留的」。**把日志切成以动作为单位的窗口**，断言才成立：
+
+```bash
+"$ADB" -s <id> logcat -c                                   # 1) 清缓冲，划定窗口起点
+mobilecli io tap --device <id> <cx>,<cy>                   # 2) 执行【一个】动作
+sleep 1
+"$ADB" -s <id> logcat -d --pid="$PID" -s flutter > win.log # 3) 只取这一步的日志
+grep -qE "<预期锚点>" win.log && echo PASS || echo FAIL     # 4) 对着窗口断言
+```
+
+- `-d` 是 dump 后退出（不是长驻），配合 `-c` 才能得到干净窗口。
+- `--pid="$PID"` 防串台（§3），两者一起用。
+- **App 侧配合打机器可读锚点**，断言就不用写正则去猜人类可读文本：
+
+  ```dart
+  dev.log('{"evt":"order_submitted","id":"$id"}', name: 'e2e');   // dart:developer
+  ```
+
+  断言侧 `grep -o '{.*}' win.log | jq -e 'select(.evt=="order_submitted")'`。锚点串本身放项目 `CLAUDE.md`。
+- **更硬的错误断言**见 `vm-service.md` §4：`errorsSinceReload` 一次覆盖所有错误类型，不用为每种错误写一条 grep。
+
+---
+
+## 4.2 确定性开关：先关动画，再截图/点击
+
+动画在跑时截图和点击都会飘，这是设备层 flake 的头号来源。**跑用例前关掉系统动画**（可逆，属绿区）：
+
+```bash
+for k in window_animation_scale transition_animation_scale animator_duration_scale; do
+  "$ADB" -s <id> shell settings put global $k 0
+done
+```
+
+**收尾必须还原并回查**（与 §10 断网同级——把用户设备留在「没有动画」的状态是收尾事故）：
+
+```bash
+"$ADB" -s <id> shell settings put global window_animation_scale 1.0
+"$ADB" -s <id> shell settings put global transition_animation_scale 1.0
+"$ADB" -s <id> shell settings delete global animator_duration_scale   # 该项默认可能是未设置
+"$ADB" -s <id> shell settings get global window_animation_scale       # 回查：确认已还原
+```
+
+> **改设置前先读原值再改**，还原时写回读到的那个值，别假设默认是 1.0。实测有机型 `animator_duration_scale` 原本就是未设置（`null`），这种要用 `settings delete` 而不是写 1.0。
+
+其它可控的确定性 / 场景开关（同样用完还原 + 回查）：
+
+```bash
+"$ADB" -s <id> shell settings put system font_scale 1.3           # 大字号下的布局核验
+"$ADB" -s <id> shell cmd uimode night yes|no                      # 系统级深色模式
+"$ADB" -s <id> shell pm grant|revoke <applicationId> <permission> # 权限流程的确定性前置
+```
+
+> 深色模式核验优先用 `vm-service.md` §3.5 的 `brightnessOverride`——**不改系统设置、不用还原**，比 `cmd uimode` 干净。
+
+---
+
+## 4.3 量化指标：启动耗时与掉帧（可断言的数字）
+
+视觉和交互之外还有一个维度：**性能可以是验收标准的一部分**，而且是数字，不需要人来判断。
+
+```bash
+# 冷启动耗时：force-stop 后测，TotalTime 就是可断言的毫秒数
+"$ADB" -s <id> shell am force-stop <applicationId>
+"$ADB" -s <id> shell am start -W -n <applicationId>/.MainActivity | grep -E "TotalTime|LaunchState"
+# → LaunchState: COLD / TotalTime: 1725
+
+# 掉帧：跑完一段交互后读，给出 janky 比例与分位数
+"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> reset      # 先归零
+# …执行要测的那段交互…
+"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> \
+  | grep -E "Total frames|Janky frames|90th|95th|99th"
+# → Janky frames: 1 (33.33%) / 90th percentile: 109ms
+```
+
+- `dumpsys gfxinfo` 的统计是**累积的**，不先 `reset` 读到的是开机以来的混合数据，断言无意义。
+- 用法：把「首屏 TotalTime < X ms」「janky 比例 < Y%」写进验收标准，自主循环就能自己判过没过——比「感觉有点卡」可执行得多。阈值是项目特定值，放项目 `CLAUDE.md`。
+- 更深的时间线用 `flutter run --profile --trace-to-file=<path>`（Perfetto proto 格式）。
 
 ---
 

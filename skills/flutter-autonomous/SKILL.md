@@ -58,14 +58,17 @@ description: Flutter 真机/模拟器自主运行与自动化测试验证(iOS + 
 
 ---
 
-## 核心认知:Flutter 控件怎么找——两条互补的路
+## 核心认知:Flutter 控件怎么找——三条互补的路
 
 Flutter 用 Skia/Impeller 画 canvas,系统无障碍树**默认**几乎空,但这**不等于找不到控件**:
 
 1. **Dart VM 直连(Patrol / integration_test)**:走 widget 树按 `Key` 精确查找+断言,**可复跑、出 pass/fail**。→ **确定性回归**用它。这是 Flutter 唯一不依赖无障碍树暴露、iOS/Android 都稳的断言路径。
-2. **无障碍树驱动(mobilecli `dump ui` / mobile-mcp `list_elements`)**:**只要控件暴露 `Semantics` label**,返回 label + **设备像素 rect**,取中心直接点,无需换算。→ **交互式探索/导航/一次性验证**用它,比盲点坐标又快又准。
+2. **无障碍树驱动(mobilecli `dump ui` / mobile-mcp `list_elements`)**:**只要控件暴露 `Semantics` label**,返回 label + **设备像素 rect**,取中心直接点,无需换算。→ **交互式探索/导航/一次性验证**用它,比盲点坐标又快又准。**只有它能点**。
+3. **VM Service 内省(`flutter run` 已开的那条通道)**:不写测试、不重新构建,直接从跑着的 App 里取 widget 树(**带 `Key` 和源码行号**)、render 树(**真实 constraints/size**)、运行时状态、结构化错误。→ **诊断/取证/断言但不需要点**时用它。详见 `references/vm-service.md`。
 
-只有**纯 canvas 绘制**(图表内部、无 Semantics 包裹的元素)两条都找不到——那种才回退「截图肉眼 + 量坐标换算」。
+三条的分工:**要点用②,要证据用③,要回归用①**。②③互补的关键在于 ③ **不依赖无障碍树**——控件没包 `Semantics`、`dump ui` 列不出,widget 树照样列得出还给行号。
+
+只有**纯 canvas 绘制**(图表内部、无 Semantics 包裹的元素)**在「点」这件事上**三条都给不了坐标——那种才回退「截图肉眼 + 量坐标换算」。但「在不在、对不对」的判断,③ 始终有效,别因为点不到就连判断也降级。
 
 ---
 
@@ -73,7 +76,8 @@ Flutter 用 Skia/Impeller 画 canvas,系统无障碍树**默认**几乎空,但�
 
 | 场景 | 用什么 | 关键 |
 |---|---|---|
-| **即时交互/探索/诊断**(自主跑首选) | **mobilecli** | 已装二进制,免 MCP/重启;`dump ui`→`io tap` 坐标级 |
+| **即时交互/探索**(要点、要输入、要滑) | **mobilecli** | 已装二进制,免 MCP/重启;`dump ui`→`io tap` 坐标级 |
+| **诊断/取证**(控件在不在、哪行代码画的、布局尺寸、报没报错) | **VM Service** | `flutter run` 已开的通道,一行 curl;不依赖 Semantics,带源码行号 → `references/vm-service.md` |
 | MCP 工具流(已注册时) | **mobile-mcp** | 同引擎 MCP 化,`list_elements`→`click`;改配置下次会话才生效 |
 | **可复跑 Flutter 断言**(进 CI) | **Patrol** | Dart VM 按 Key,iOS/Android 都稳 |
 | TS 可复跑脚本/系统级/跨 app | mobilewright | `getByLabel().tap()` auto-wait;但 **Flutter 标 ⏳ 未正式支持**,Flutter 断言仍用 Patrol |
@@ -124,38 +128,57 @@ Text(_err, key: const Key('error_text'))
 Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不在某页"
 ```
 
-> 自查:`dump ui` 列不出你的控件 = 没暴露 Semantics → 回代码补 `Semantics(label:)`,把"测不到"当代码缺陷修,别降级盲点。
+> 自查(人工):`dump ui` 列不出你的控件 = 没暴露 Semantics → 回代码补 `Semantics(label:)`,把"测不到"当代码缺陷修,别降级盲点。
+>
+> **自查(自动,更该用这条)**:这条契约能被机器判定,别等上了设备才发现。在 widget test 里加 `await expectLater(tester, meetsGuideline(labeledTapTargetGuideline))`——**没包 `Semantics` 的 `GestureDetector` 会直接判失败并给出 rect**;`androidTapTargetGuideline`/`iOSTapTargetGuideline` 判热区是否够 48×48、`textContrastGuideline` 判对比度。秒级、无设备,把"控件天生可测"从口头约定变成 CI 拦得住的断言。写法见 `references/offline-test-layer.md`。
 
 ---
 
-## 验证四层:按改动类型选最硬的证据
+## 验证分层:每上一层慢一个数量级,能在下面证明的绝不往上抬
+
+**A. 离线层——无设备、秒级、每次 push 都能跑**(详见 `references/offline-test-layer.md`)
 
 | 层 | 验什么 | 怎么验 |
 |---|---|---|
-| ① **离线 fixture(秒级,无设备)** | 解码/解析/数值/状态机/错误处理等纯逻辑 | `flutter test` / `dart test` + fixture/mock,见 `references/offline-test-layer.md`(真实数据 JSON / 手搓字节 / forTesting 注入 / probe 四策略) |
-| ② **元素驱动(一次性)** | 控件交互/页面跳转/数据展示 | `dump ui`→点中心 + 截图 |
-| ③ **Patrol(可复跑)** | 同②但要回归断言、进 CI | 按 Key,出 pass/fail |
-| ④ **日志 / 截图(取证)** | 连接/状态机/gating 用**日志**(最硬);视觉/布局用**截图** | `adb logcat -s flutter`(Android)/`flutter logs` / `xcrun simctl spawn <udid> log stream`(iOS);grep 连接URL/状态名/`RenderFlex overflowed`(带文件:行号) |
+| ① **纯逻辑 fixture** | 解码/解析/数值/状态机/错误处理 | `flutter test` / `dart test` + fixture/mock(真实数据 JSON / 手搓字节 / forTesting 注入 / probe 四策略) |
+| ② **widget test** | **控件交互/页面跳转/表单/条件渲染** | `testWidgets` + `tester.tap` + 按 `Key` 断言。**这层最容易被漏**——大量"要上设备点一下"的验证其实在这里毫秒级就能证 |
+| ③ **golden 矩阵 + a11y guideline** | 视觉回归(主题×字号矩阵) / 无障碍契约自检 | `matchesGoldenFile` 出**量化 diff + 只画变化区域的图**;`meetsGuideline` 自动判 label 缺失·热区过小·对比度不足 |
 
-**闭环顺序**:`flutter analyze` → `flutter test`(离线层,秒级) → 元素驱动(一次性) → Patrol(可复跑)。**离线层先绿再上设备**,省设备时间;能离线证明的逻辑别上真机。
+**B. 设备层——只验离线证不了的:真实渲染、系统集成、真实数据**
+
+| 层 | 验什么 | 怎么验 |
+|---|---|---|
+| ④ **VM Service 内省(取证)** | 控件在不在/是哪行代码画的/布局真实尺寸/这步有没有报错 | 一行 curl 取 widget 树(带 Key+行号)、render 树(constraints/size)、`errorsSinceReload` → `references/vm-service.md` |
+| ⑤ **元素驱动(一次性)** | 真机上的交互/跳转/数据展示 | `dump ui`→点中心 + 截图 |
+| ⑥ **Patrol(可复跑)** | 同⑤但要回归断言、进 CI | 按 Key,出 pass/fail |
+| ⑦ **日志(取证)** | 连接/状态机/gating——**发生没发生用日志,不用截图** | `adb logcat -s flutter`(Android)/`flutter logs` / `xcrun simctl spawn <udid> log stream`(iOS);清缓冲→执行动作→只读这一步的日志窗口再断言 |
+
+**闭环顺序**:`flutter analyze` → `flutter test`(①②③ 一把跑完,秒级) → 元素驱动/VM Service(一次性) → Patrol(可复跑)。**离线层先全绿再上设备**。
+
+**选层铁律**:
+- 「点一下看它变没变」——先问**能不能用 widget test 证**(②),多数能;不能才上设备。
+- 「看起来对不对」——先问**能不能用 golden 证**(③):golden 给的是 `0.32%, 3619px diff` 这种**数字 + 只画变化区域的图**,比人/AI 盯整屏截图又快又准。截图留给 golden 覆盖不到的真机渲染。
+- 「控件找不到 / Key 对不对 / 布局为什么歪」——**别先截图**,用 ④ 看 widget 树和 constraints,一步到源码行。
 
 ---
 
 ## 自主开发完整循环 + 失败决策树
 
 ```
-读任务 → 自展开验收标准(3~8 条可断言) → 写实现(关键控件加 Key+Semantics)+ 写 Patrol/离线测
+读任务 → 自展开验收标准(3~8 条可断言,逐条标好落哪层)
+  → 写实现(关键控件加 Key+Semantics)+ 写配套测试(离线①②③ 能覆盖的先写在离线层)
   → flutter analyze(零警告)
-  → flutter test(离线层)        ── 挂?纯逻辑 bug,不上设备直接修
+  → flutter test(离线层 ①②③)   ── 挂?逻辑/行为/视觉契约 bug,不上设备直接修
   → 确认设备在线(mobilecli devices;离线自救一次仍离线才停)
   → patrol test --device <id> -t integration_test/<feature>_test.dart
       ├─ 通过 → 截图核验 → (按用户提交策略:增量提/最后提/不提)→ 输出报告
-      └─ 失败 → 失败分析(≤5 轮)→ 修 → 重跑;5 轮仍败 → 停,出卡住报告,继续下个任务
+      └─ 失败 → 失败分析(≤5 轮;找不到控件先查 VM Service widget 树)→ 修 → 重跑
+                5 轮仍败 → 停,出卡住报告,继续下个任务
 ```
 
 **完成门槛(报告)**:闭环的终点是一份报告,必须含 ① `✅/❌ 功能名` + **逐条验收对照**(含第 5 轮卡住项)② 改动文件清单 ③ 关键截图 ④(若按策略提交了)commit hash + message ⑤ 遗留问题。**缺一项不算完成**——无人值守时你早上是靠这份证据收割的,不是靠"它说做完了"。
 
-**失败分类**:编译错→`flutter analyze` 读错误修;`found 0 widgets`→查 Key 拼写/是否需 scroll/条件渲染;断言失败→**逻辑 bug 改实现,不改测试降标准**;crash/超时→`mobilecli device crashes list|get` 读堆栈第一行 `package:<your_app>/`;安装/连接→`mobilecli devices` + 自救一次仍失败停。
+**失败分类**:编译错→`flutter analyze` 读错误修;`found 0 widgets`→**先用 VM Service 拉 widget 树核对 Key**(带源码行号,比翻代码快),再查是否需 scroll/条件渲染;断言失败→**逻辑 bug 改实现,不改测试降标准**;crash/超时→`mobilecli device crashes list|get` 读堆栈第一行 `package:<your_app>/`;安装/连接→`mobilecli devices` + 自救一次仍失败停。
 
 **Patrol 命令**:`patrol test -t <file> --device <id> [--timeout 300]`(自动构建+装+跑);构建失败 `flutter clean && flutter pub get && patrol test`。写法模板:
 
@@ -181,13 +204,17 @@ void main() => patrolTest('用户可用邮箱登录', ($) async {
 **启动**:命令**必须以 `flutter run` 开头**(若你的权限规则按前缀匹配如 `Bash(flutter run:*)`,nohup/管道/`&` 包裹会被拦),后台化靠 `run_in_background: true` 参数;带 `--pid-file`(默认 `/tmp/flutter_app.pid`,多设备/会话并发时拼项目或设备后缀避免撞)。
 
 ```bash
-flutter run -d <deviceId> --target <entry> --pid-file=<PID_FILE> <dart-defines 从项目 CLAUDE.md 读>
+flutter run -d <deviceId> --target <entry> \
+  --pid-file=<PID_FILE> --vmservice-out-file=<URI_FILE> <dart-defines 从项目 CLAUDE.md 读>
 ```
 
-**等构建**(长驻进程不自发完成通知,另起后台 Bash 轮询):
+**等构建**(长驻进程不自发完成通知,另起后台 Bash 轮询)。**优先等 `--vmservice-out-file` 落盘**——文件非空 = App 起来且 VM Service 就绪,是个二值信号,不用解析人类可读输出;失败仍需看输出兜底:
+
 ```bash
-until grep -qE "Flutter run key commands|FAILURE:|Gradle task .* failed|Error launching" <output>; do sleep 3; done
+until [ -s "<URI_FILE>" ] || grep -qE "FAILURE:|Gradle task .* failed|Error launching" <output>; do sleep 2; done
 ```
+
+拿到的 URI 顺带就是 §验证分层④ 的入口(转 http 后一行 curl 取 widget 树/布局/错误),见 `references/vm-service.md`。
 
 **三档热重载铁律**(启动必带 `--pid-file`,否则发不了信号,每改一行冷启浪费几十分钟):
 
@@ -198,6 +225,8 @@ until grep -qE "Flutter run key commands|FAILURE:|Gradle task .* failed|Error la
 | `android/`·`ios/` 原生 / `pubspec.yaml`(增删依赖·assets) / 含原生码的新插件 / engine·channel | **③ 冷启动**(停掉重 `flutter run`) |
 
 口诀:Dart 方法体→USR1;初始化/注册/main/路由→USR2;动原生/pubspec/插件→冷启动;**拿不准先 USR2**(仍比冷启快)。
+
+> **要判热重载成败时别用 signal**:`kill -USR1` 发出去就没下文,只能回头 grep 输出猜。改完代码必须确认"这次重载到底成没成"时,走 `flutter run --machine` 的 `app.restart`——它**返回 `{"code":0,"message":"Reloaded N libraries"}`**,`code!=0` 直接就是断言。见 `references/vm-service.md` §2.4。日常随手重载仍用 signal 更省事。
 
 ---
 
@@ -217,9 +246,10 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 
 ## 平台细节、进阶与可移植性
 
-- **iOS 对等** → `references/ios.md`(`xcrun simctl` 模拟器优先 / WebDriverAgent 真机 / go-ios / 设备信任·provisioning / 收尾 terminate)
-- **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/断网测试与恢复,平台末选)
-- **离线测试层** → `references/offline-test-layer.md`(fixture 四策略)
+- **VM Service 内省** → `references/vm-service.md`(第三条路:widget 树带源码行号 / render 树真实尺寸 / 结构化错误 / evaluate 读状态 / 运行时切深色模式;HTTP 与 WS 的能力边界)
+- **iOS 对等** → `references/ios.md`(`xcrun simctl` 模拟器优先 / WebDriverAgent 真机 / go-ios / 设备信任·provisioning / 确定性开关 / 收尾 terminate)
+- **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/关动画等确定性开关/性能指标/断网测试与恢复,平台末选)
+- **离线测试层** → `references/offline-test-layer.md`(fixture 四策略 + widget test + golden 矩阵 + a11y guideline)
 - **工具选型** → `references/tool-decision-tree.md`(mobilecli/mobile-mcp/mobilewright/Patrol 何时用)
 - **受限网络/权限** → `references/restricted-network.md`(npm 被企业网关拦时的备用渠道、macOS 执行位与 quarantine、哪些卡点只能人给)
 - **规模化/无人值守** → `references/scaling.md`(信任阶梯、worktree/子代理/workflow 并行、/schedule·/loop)
@@ -232,14 +262,15 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 **Always 永远要**
 1. 先环境自举;**绿区**的事自己做完接着干(§2)。
 2. 交互前先 `dump ui` 检视,按 Key/label 定位,坐标取 rect 中心。
-3. 可交互/可断言控件双标 `Key` + `Semantics`;`dump ui` 列不出 = 回代码补。
-4. 能离线证明的逻辑先 `flutter test` 过;能用日志证明的用日志,不用截图。
-5. 改代码走 `--pid-file` + `USR1`/`USR2`,不冷启。
-6. 收尾两步关 App 并**回查确认**;**不验证不报完成**。
-7. 断言失败=逻辑 bug,修实现不改测试;自修复 **≤5 轮**(第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告,继续下个任务)。
-8. 报告按**完成门槛**五项出齐,缺一项不算完成。
-9. 提交按用户提交策略执行(§1),不默认自动提交。
+3. 可交互/可断言控件双标 `Key` + `Semantics`;`dump ui` 列不出 = 回代码补,并用 `meetsGuideline(labeledTapTargetGuideline)` 让它以后自动被拦住。
+4. **先问能不能不上设备**:交互能 widget test 证的别上设备,视觉能 golden 证的别靠肉眼看截图;能用日志/`errorsSinceReload` 证明的用它们,不用截图。
+5. 找不到控件 / 布局歪 / 疑似报错,**先查 VM Service**(widget 树带源码行号、render 树给真实 constraints),别一上来就截图肉眼找。
+6. 改代码走 `--pid-file` + `USR1`/`USR2`,不冷启;**要判重载成败用 `--machine` 的 `app.restart`**,别 grep 输出猜。
+7. 收尾两步关 App 并**回查确认**;**不验证不报完成**。
+8. 断言失败=逻辑 bug,修实现不改测试;自修复 **≤5 轮**(第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告,继续下个任务)。
+9. 报告按**完成门槛**五项出齐,缺一项不算完成。
+10. 提交按用户提交策略执行(§1),不默认自动提交。
 
 **Never — 四红线**(默认禁止,唯一解锁=用户事先明确授权并写明范围;详见 §2):① 设备物理掉线(自救一次仍败才停) ② 花真钱的操作 ③ 密钥/凭证操作 ④ 不可逆破坏 + 项目 `CLAUDE.md` 特有红线。未授权时:交互可问一句,无人值守跳过并标注「需授权」,不卡住等人。
 
-**Never — 反模式**:有 Semantics 还盲点 / 写死历史坐标 / 把 `kill flutter run` 当关 App / 改测试绕过断言 / 把"执行了操作"当"达到了结果"。
+**Never — 反模式**:有 Semantics 还盲点 / 写死历史坐标 / 把 `kill flutter run` 当关 App / 改测试绕过断言 / 把"执行了操作"当"达到了结果" / **能离线证明却上真机点**(widget test·golden 覆盖得到的别占设备时间) / **靠肉眼盯整屏截图判断视觉回归**(golden 给的是数字 + 只画变化区域的图)。

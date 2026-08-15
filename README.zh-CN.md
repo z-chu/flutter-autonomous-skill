@@ -135,23 +135,29 @@ claude
 flowchart LR
     subgraph loop["自主闭环（≤5 轮自修复）"]
         A[自展开验收标准] --> B["写实现<br/>（控件加 Key + Semantics）"]
-        B --> C["flutter analyze<br/>+ 离线 fixture 秒级单测"]
-        C --> D["元素驱动交互<br/>mobilecli dump ui → 点 rect 中心"]
-        D --> E["Patrol 按 Key 断言<br/>（可复跑、进 CI）"]
-        E --> F[截图 + 日志取证]
-        F -->|通过| G[带证据的验收报告]
-        F -->|失败| H[失败分类 → 修实现不改测试] --> C
+        B --> C["flutter analyze + 离线层<br/>fixture / widget test / golden+a11y"]
+        C --> D["VM Service 取证<br/>widget 树带源码行号 / 布局尺寸 / 错误"]
+        D --> E["元素驱动交互<br/>mobilecli dump ui → 点 rect 中心"]
+        E --> F["Patrol 按 Key 断言<br/>（可复跑、进 CI）"]
+        F --> G[截图 + 日志取证]
+        G -->|通过| H[带证据的验收报告]
+        G -->|失败| I[失败分类 → 修实现不改测试] --> C
     end
 ```
 
-**验证四层** —— 按改动类型永远选最硬的证据：
+**验证分层** —— 先问「这必须上设备吗」，再选最硬的证据：
 
-| 层 | 证明什么 | 成本 |
-|---|---|---|
-| ① 离线 fixture 单测 | 纯逻辑：解析 / 数值 / 状态机 / 错误处理 | 秒级、无设备 |
-| ② 元素驱动交互 | 点击、跳转、数据展示（一次性） | 快、在设备上 |
-| ③ Patrol 按 `Key` | 可复跑回归断言，出 pass/fail 进 CI | 在设备上 |
-| ④ 日志 & 截图 | 连接/状态机用日志（比截图硬）；视觉布局用截图 | 取证 |
+| | 层 | 证明什么 | 成本 |
+|---|---|---|---|
+| **离线** | ① 纯逻辑 fixture | 解析 / 数值 / 状态机 / 错误处理 | 秒级、**无设备** |
+| **离线** | ② widget test | 控件交互、页面跳转、表单、条件渲染 | 秒级、**无设备** |
+| **离线** | ③ golden 矩阵 + a11y guideline | 视觉回归（主题×字号）；可点控件有没有 label / 热区 / 对比度 | 秒级、**无设备** |
+| 设备 | ④ VM Service 内省 | 控件在不在、**是哪行代码画的**、布局真实尺寸、这步报没报错 | 一行 curl，不用点 |
+| 设备 | ⑤ 元素驱动交互 | 真机上的点击、跳转、数据展示（一次性） | 快、在设备上 |
+| 设备 | ⑥ Patrol 按 `Key` | 可复跑回归断言，出 pass/fail 进 CI | 在设备上 |
+| 设备 | ⑦ 日志取证 | 连接 / 状态机 / gating（比截图硬） | 取证 |
+
+其中 ②③ 最容易被漏 —— "点一下看它变没变""看起来对不对"这类验证，默认心智容易划给设备层，其实在离线层是**毫秒级、确定性**的。golden 失败给的是 `0.32%, 3619px diff` 这种数字加一张**只画变化区域**的图，比盯整屏截图又快又准。
 
 **一个交互底座。** iOS（WebDriverAgent / `xcrun simctl`）与 Android（`adb`）的差异全部被 [`mobilecli`](https://github.com/mobile-next/mobilecli) 抹平 —— 方法论写一遍，双端通用。平台细节见 [`references/ios.md`](skills/flutter-autonomous/references/ios.md) 与 [`references/android.md`](skills/flutter-autonomous/references/android.md)。
 
@@ -162,15 +168,17 @@ flowchart LR
 ```
 skills/flutter-autonomous/
 ├── SKILL.md                 # Claude 加载的方法论本体（环境自举 / 元素驱动 /
-│                            # 验证四层 / 失败决策树 / 硬原则）
+│                            # 验证分层 / 失败决策树 / 硬原则）
 ├── scripts/
 │   ├── bootstrap.sh         # 跨平台环境自举（幂等可重入）
 │   └── tap-by-label.sh      # 一条命令按 Semantics label 点击 Flutter 控件
 ├── references/              # 按需加载，不占默认上下文（省 token）
-│   ├── ios.md               # iOS 模拟器优先：simctl / WDA / provisioning / 收尾
-│   ├── android.md           # adb 细节、日志取证、断网测试与恢复
-│   ├── offline-test-layer.md# 离线秒级单测的四种 fixture 策略
-│   ├── tool-decision-tree.md# mobilecli / mobile-mcp / mobilewright / Patrol 何时用哪个
+│   ├── vm-service.md        # 从跑着的 App 内部取证：widget 树带源码行号 /
+│   │                        # 布局真实尺寸 / 结构化错误 / 运行时读状态
+│   ├── ios.md               # iOS 模拟器优先：simctl / WDA / provisioning / 确定性开关 / 收尾
+│   ├── android.md           # adb 细节、日志窗口断言、关动画等确定性开关、性能指标、断网测试
+│   ├── offline-test-layer.md# 无设备的三层：fixture 四策略 + widget test + golden/a11y
+│   ├── tool-decision-tree.md# mobilecli / VM Service / mobile-mcp / mobilewright / Patrol 何时用哪个
 │   └── scaling.md           # 信任阶梯、worktree 并行、整晚无人值守
 ├── templates/               # setup-project.sh 装进你项目的模板
 │   ├── CLAUDE.md            # 项目宪法（{{占位}} 自动探测回填）

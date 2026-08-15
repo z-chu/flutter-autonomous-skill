@@ -1,5 +1,5 @@
 ---
-description: 验证当前改动——按改动类型选最硬证据，跑四层闭环，失败分类自修复 ≤5 轮
+description: 验证当前改动——按改动类型选最硬证据，先离线后设备跑分层闭环，失败分类自修复 ≤5 轮
 allowed-tools: Bash(flutter:*), Bash(flutter run:*), Bash(dart:*), Bash(patrol:*), Bash(adb:*), Bash(xcrun:*), Bash(kill:*), Bash(ps:*), Bash(mobilecli:*), Bash(npx mobilecli:*), Bash(bash scripts/tap-by-label.sh:*), Read, Edit, Write, Grep, Glob
 argument-hint: [验证用例文件路径（可选，不填则跑 integration_test/ 全部）]
 ---
@@ -8,36 +8,39 @@ argument-hint: [验证用例文件路径（可选，不填则跑 integration_tes
 
 ## 第 0 步：按改动类型选「最硬证据」
 
-不是所有改动都要跑 Patrol——先选证据，再决定要不要上设备：
+不是所有改动都要上设备——**先问「这必须上设备吗」，再选证据**：
 
-| 改动类型 | 最硬证据 |
-|---------|---------|
-| WebSocket / RPC 连接、状态机切换、gating 逻辑 | **日志**（最硬）：Android `adb logcat -s flutter` / `flutter logs`；iOS `xcrun simctl spawn <udid> log stream`。grep 连接 URL / 状态名 / `RenderFlex overflowed`（带文件:行号） |
-| 视觉 / 布局 / 颜色 / 空态 / Loading | **截图**：`mobilecli screenshot --device <id> -o <out>` → Read 肉眼核验 |
-| 控件交互 / 页面跳转 / 数据展示（一次性） | **元素驱动**：`dump ui`→点 rect 中心，或 `bash scripts/tap-by-label.sh <id> "<label>"` |
-| 需要精确、可复跑、进 CI 的断言 | **Patrol**：按 `Key`，出 pass/fail |
-| 纯逻辑（解析 / 数值 / 状态机 / 错误处理） | **离线 fixture**：`flutter test`，秒级、无设备 |
+| 改动类型 | 最硬证据 | 要设备吗 |
+|---------|---------|---|
+| 纯逻辑（解析 / 数值 / 状态机 / 错误处理） | **离线 fixture**：`flutter test`，秒级 | 否 |
+| 控件交互 / 页面跳转 / 表单校验 / 条件渲染 | **widget test**：`testWidgets` + `tester.tap` + 按 `Key` 断言 | **否**（这条最容易被误判成要设备） |
+| 视觉 / 布局 / 颜色 / 深色模式 / 大字号 | **golden 矩阵**：`matchesGoldenFile`，出量化 diff + 只画变化区域的图 | 否 |
+| 可交互控件有没有 label / 热区 / 对比度 | **a11y guideline**：`meetsGuideline(labeledTapTargetGuideline)` 等 | 否 |
+| 控件找不到 / Key 对不对 / 布局真实尺寸 / 这步报没报错 | **VM Service**：一行 curl 取 widget 树（带源码行号）、render 树、`errorsSinceReload` | 是（但不用点） |
+| WebSocket / RPC 连接、状态机切换、gating 逻辑 | **日志**：清缓冲 → 执行动作 → 只读这一步的日志窗口再断言 | 是 |
+| 真机渲染观感 / 系统集成 / 真实数据 | **元素驱动 + 截图**：`dump ui`→点 rect 中心，或 `bash scripts/tap-by-label.sh <id> "<label>"` | 是 |
+| 需要精确、可复跑、进 CI 的断言 | **Patrol**：按 `Key`，出 pass/fail | 是 |
 
-混合改动就组合用，不必为了跑而跑 Patrol。
+混合改动就组合用。**别为了跑而跑 Patrol，也别把离线层能证的事搬上设备。**
 
 ---
 
-## 第 1 步：四层闭环（顺序固定，离线层排在 Patrol 之前）
+## 第 1 步：分层闭环（顺序固定，离线层全绿才上设备）
 
 ```bash
 # ① 静态：零警告才继续
 flutter analyze
 
-# ② 离线 fixture 层（秒级，无设备）——先绿再上设备，省设备时间
-#    解析/数值/状态机/错误处理等纯逻辑用它锁住；无 test/ 目录时跳过此步。
-#    这里失败 = 纯逻辑 bug，不上设备，直接按「失败分类 C」修实现。
-flutter test
+# ② 离线层（秒级，无设备）——纯逻辑 + widget test + golden/a11y 一把跑完
+#    这里失败 = 逻辑 / 行为 / 视觉契约 bug，不上设备，直接按「失败分类 C」修实现。
+flutter test                 # 无 test/ 目录时跳过此步
 
 # ③ 设备发现（绝不写死 id；iOS 默认目标模拟器，细节见 references/ios.md）
 mobilecli devices            # 空再退 adb devices / xcrun simctl list devices booted
 ```
 
 - analyze 有警告 / 离线层失败：**先修再继续**，离线层全绿才上设备。
+- golden 失败先读 `test/failures/*_isolatedDiff.png`（只画变化区域）判断这次视觉变化是否预期；**是预期才 `flutter test --update-goldens`**，无脑更新 = 改测试绕过断言。
 - 设备都空：按 skill 的环境自举自救一次（`adb kill-server && adb start-server` / `xcrun simctl boot <udid>`）；仍空=设备物理掉线，**停止，输出「设备离线」报告，不进循环**。
 
 进设备前先确认前台是目标包，防串台：`mobilecli apps foreground --device <id>`。
@@ -59,7 +62,14 @@ patrol test -t $ARGUMENTS --device <deviceId>               # 不填路径则省
 **断言失败=逻辑 bug，修实现，绝不改测试降标准。** 第 3 轮记下已试方向，第 4 轮换思路，第 5 轮停下出卡住报告。
 
 - **A 编译 / 构建失败**：读**完整** `flutter analyze` 输出（不只看末行），修代码，回第 1 步。构建反复失败 `flutter clean && flutter pub get` 再来。
-- **B `found 0 widgets`**：查 `Key` 拼写 → 查条件渲染（`isLoading?`/`isVisible?`）→ 查是否要先 `.scrollTo()`。控件 `dump ui` 列不出 = 没暴露 Semantics，**回代码补 `Semantics(label:)`**，别将就盲点。
+- **B `found 0 widgets`**：**先用 VM Service 把当前 widget 树拉出来核对**（带 `Key` 和源码行号，比翻代码快）：
+  ```bash
+  VM=$(sed 's|^ws://|http://|; s|/ws$|/|' <URI_FILE>); ISO=$(curl -s "${VM}getVM" | jq -r '.result.isolates[0].id')
+  curl -s "${VM}ext.flutter.inspector.getRootWidgetSummaryTree?isolateId=${ISO}&objectGroup=ai" \
+   | jq -r '[.result.result] | .. | objects | select(.description? and .createdByLocalProject?)
+            | "\(.description)  ←  \(.creationLocation.file | split("/") | last):\(.creationLocation.line)"'
+  ```
+  再查 `Key` 拼写 → 条件渲染（`isLoading?`/`isVisible?`）→ 是否要先 `.scrollTo()`。控件 `dump ui` 列不出 = 没暴露 Semantics，**回代码补 `Semantics(label:)`** 并补一条 `meetsGuideline(labeledTapTargetGuideline)` 让它以后自动被拦住，别将就盲点。
 - **C 断言失败（expect 不符）**：逻辑 bug，读实现修，**不降断言标准**。
 - **D crash / 超时**：`mobilecli device crashes list --device <id>` → `... crashes get <crash_id> --device <id>`，读堆栈第一个 `package:<your_app>/` 的行，修那段。
 - **E 安装 / 断连**：`mobilecli devices` 确认状态，重试一次仍失败则停止报告。
