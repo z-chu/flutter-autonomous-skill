@@ -5,6 +5,159 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **A worked example of expanding acceptance criteria**, in the autonomous loop
+  section. Step one of the loop had always said "self-expand into 3–8 assertable
+  items, tagged by layer", but never showed what that looks like — and it is the
+  step every later decision hangs on. The example ships with its own test: if you
+  can't tag an item with a layer, it isn't assertable yet, so rewrite it before
+  starting.
+- **A rule for how many platforms to run.** The description, `/ship`, `/verify`
+  and the scaling templates all asked for "both platforms green", while the loop
+  diagram was single-device and nothing said when both are actually required.
+  What the project ships decides first — a single-platform project runs that
+  platform only, rather than chasing parity onto one it doesn't ship. Past that,
+  the change decides: both when platform channels/native plugins/permission
+  dialogs/IME/safe areas/back gestures/font-metric-sensitive layout are involved;
+  otherwise one, stated as such in the report. Simulator first where there is
+  one — and single-platform green is never written up as both-platform green.
+- **Prerequisite state (login, wallet, identity, seed data) is now classified as
+  "only a human can give it"**, alongside the GUI-only permission blockers it
+  already sat next to in spirit. Nothing can be verified behind a login wall, and
+  it isn't something the run can install its way past. The order matters: don't
+  lead with the question — the device is usually already logged in, so launch and
+  look, then try to route around it (deeplink to the page under test, or a
+  debug-only hook that sets state via VM Service `evaluate`). Only when that
+  fails does it stop, and it stops saying what it's stuck on, so the user can
+  hand over a test account, tap through it themselves, or authorize registering
+  one. It is a runtime blocker, not project configuration — the skill asks the
+  person in front of it rather than requiring anything to be set up in advance.
+
+- **`tools/check-mirror.sh`**, a maintainer check that the `en/` mirror hasn't
+  quietly fallen behind. "Sync it afterwards" was an honor-system rule, and it
+  had already failed for two releases without anything in the repo looking wrong.
+  The structural mode pairs every file and compares heading/code-block counts;
+  `--diff <ref>` fails when a branch touches one side alone. It lives outside
+  `skills/` on purpose — everything under there ships to every user, and a
+  maintainer tool is dead weight in every install.
+
+- **A "silent failure" list for device input.** The backend guarantees the event
+  was dispatched, not that Flutter received it — and when it doesn't, the exit
+  code is still 0. `io swipe` is the usual offender (Flutter's scroll gestures
+  are sensitive to a synthesized event's duration and step; the screen simply
+  doesn't move), alongside synthesized long-presses and taps that land in the
+  blank area of a container wrapping the target. The rule is now explicit:
+  confirm with outside evidence — dump again and compare an anchor's `rect.y`,
+  or diff screenshots — and after two failed attempts change route rather than
+  burning rounds on the same command. This was already covered in spirit by
+  "don't treat performing an action as achieving the result"; naming the
+  commands it actually happens with is what makes it checkable.
+
+- **A codegen tier in the hot-reload table.** The table jumped from method
+  bodies to native code and never mentioned the most common Flutter case in
+  between: `.arb`/l10n strings, freezed and json_serializable annotations,
+  drift schemas. A bare USR1 shows the stale generated output, which reads
+  exactly like "my change didn't take" — and sends you off editing code that
+  was already correct. Run the generator first, then USR2.
+
+- **What a simulator cannot verify.** "Simulator first" is good advice that
+  quietly breaks for a specific class of work: screenshot protection and secure
+  layers (a simulator captures fine, which looks identical to the feature not
+  working), real performance and jank, biometrics, push, camera and sensors,
+  attestation SDKs, real network conditions. Its green there is a fake green, so
+  that class now skips the simulator tier and goes straight to a real device.
+
+- **A reset before every acceptance item.** State left behind by the previous
+  item becomes the next one's starting point — parked in a bottom sheet, a
+  filter still applied — and the drift compounds while the report looks fine,
+  because every screenshot has content; it's just the wrong page. Three steps
+  (`apps terminate` → `apps launch` → `dump ui` to confirm the starting point)
+  cost seconds and buy off an entire item being silently invalid. Unattended
+  runs are where this matters most, and where nobody is watching to catch it.
+
+- **`adb shell` does not go through the phone's VPN/proxy** (`references/android.md`).
+  `adb shell curl/ping` uses the device's raw network stack and bypasses any TUN
+  a VPN or proxy app has set up, so using it to decide whether the app can reach
+  a domain can return the exact opposite of what the app sees. Reachability is
+  now judged from the app's own evidence (request outcomes in the logs, state via
+  the VM Service); `adb shell` is for the physical link only. Getting it backwards
+  costs a round spent fixing a network bug that doesn't exist.
+
+### Fixed
+
+- **The build-wait loop could spin forever.** It waited on the vmservice file or
+  a short list of grep patterns, so any failure outside that list (CocoaPods,
+  signing, `No supported devices`) left it polling until the harness killed it —
+  and the `<output>` it grepped never existed, since backgrounding the run left
+  no log file to read. The loop now has all three exits, and the launch keeps
+  output you can `tail`.
+  - Only "the process exited" counts as failure. The deadline is an alarm clock,
+    not a verdict: a cold checkout, a large project, a slow network or a CI
+    container can all legitimately build for half an hour, and a run that reads
+    its own alarm as a failed build and starts over with `flutter clean` turns
+    one slow build into two. Still alive with a growing log means keep waiting.
+
+- **`tap-by-label.sh` could tap nothing at all, and report success.** Two bugs,
+  both of which surface on ordinary Flutter screens:
+  - The TSV put the label first, unescaped. Semantics merging routinely produces
+    multi-line labels (a wallet row is `"Wallet 2\naddress\n$0"`), so one match
+    became several lines: the count inflated, `sed -n Np` picked a fragment with
+    no tabs, the coordinates read back empty, and `io tap ","` went out — while
+    the script printed "tapped" and exited 0. Coordinates now come first, the
+    label is whitespace-folded and emitted last through `@tsv`, and a coordinate
+    check refuses to tap on anything malformed instead of failing silently.
+  - Matches came back in document order, and jq's `..` is pre-order, so an
+    ancestor — whose merged label naturally contains the substring — always
+    ranked above the leaf. `--index 0` therefore tended to tap the row or card
+    wrapping the target, landing in its blank area: the exact "tapped it,
+    nothing happened" symptom. Matches are now sorted by rect area ascending,
+    so the default is the smallest — the leaf you meant — and `--dump-only`
+    prints the areas so a wrong pick is visible before you tap.
+
+### Changed
+
+### Removed
+
+- **The project `CLAUDE.md` template, and with it the idea that this skill needs
+  configuring at all.** The author — its heaviest user — had never once filled it
+  in across countless runs, which is the tell: it asked for things nobody should
+  have to supply. Most of it was derivable (the installer auto-filled four of the
+  ids itself, proof they didn't need a slot); the device section said "never
+  hardcode this" while offering a field to hardcode it in; the
+  Definition-of-Done section restated the skill's own completion bar, where it
+  could only drift out of agreement. What was genuinely human knowledge — log
+  anchors, toolchain constraints, project red lines, commit policy — is better
+  said in the conversation, and written into your own `CLAUDE.md` only if you
+  want it to persist.
+  - **Deleting it costs nothing in safety, because red lines are deny-by-default.**
+    With nothing written down, all four stay fully in force and unauthorized
+    operations are skipped; configuration only ever *added* project-specific red
+    lines or *unlocked* exceptions. The absence of a config file can make a run
+    more conservative, never less. The overnight case is already covered where
+    it actually belongs — the unattended prompt template in `references/scaling.md`
+    states the constraints inline, at the moment you set the run up.
+  - Keeping it was not neutral: three places in `SKILL.md` had already drifted
+    into telling the model to read package ids and even the device id from
+    `CLAUDE.md`, contradicting §1's "auto-detect, never hardcode" — and the
+    opening paragraph, the source of the contradiction, said it too. All are
+    fixed, and the placeholder tokens they reached for no longer exist.
+  - `setup-project.sh` drops from 255 to 147 lines and **now writes only into
+    `.claude/`** — it never touches your project root. Nothing needs configuring
+    before the first run.
+- **The English mirror is back in sync**, a full version behind since 1.1.0. It
+  was missing §0 (when not to use the skill), the whole VM Service path and
+  `references/vm-service.md`, the device-first verification layering, the widget
+  test and golden/a11y layers of the offline reference, the Android log-window,
+  determinism-switch and performance-metric sections, and the iOS simulator
+  determinism switches. Its `description` also still advertised offline unit
+  tests — the exact triggering the Chinese version had deliberately dropped.
+- **"Offline-green is not UI-verified" now appears twice instead of five times.**
+  Repetition past the mechanism and the checklist was buying nothing; the space
+  went to the three gaps above.
+
 ## [1.1.0] - 2026-08-16
 
 ### Added

@@ -272,5 +272,6 @@ mobilecli io tap --device <id> <开关rect中心>                       # 拨开
 ```
 
 - **收尾铁律的网络版**：断过网就把「网络已恢复」纳入收尾回查——独立命令证明（`ping -c 1 8.8.8.8` 通、或 `dumpsys connectivity` 出现 Active default network），别拿「我执行了 enable」当「网络恢复了」。**把用户设备留在断网状态是收尾事故**，等级不低于没关 App。
+- **`adb shell` 里的网络 ≠ App 的网络**：`adb shell curl/ping` 走的是设备**裸网络栈**，**绕开手机上 VPN/代理 App 建立的 TUN**。所以拿它判断「App 能不能连上某域名」，结论可以和 App 里看到的完全相反——设备挂着代理时，`adb shell` 里连不通、App 里通得好好的（反之亦然）。**判连通性以 App 自身的证据为准**：日志里的请求结果、VM Service 取到的状态；`adb shell` 只用来验证**物理链路**（有没有 Active default network）。判反一次的代价是去修一个根本不存在的网络 bug，或者把正常的网络报成「被限制」。
 - 无 SIM 的测试机 Wi-Fi 是唯一通路（`getprop gsm.sim.state` 查），恢复失败没有移动数据兜底——更要回查到 ping 通为止。
 - 测试设计提示：断网后**已加载进内存的数据不会消失**，要触发「空数据 + 加载失败」态通常得切到未加载过的资源（新 symbol / 新页面）再观察；离线冷启动则可能被更上游的错误墙挡住到不了目标页——切资源比冷启动更可控。

@@ -1,13 +1,14 @@
 # Tool selection: mobilecli / mobile-mcp / mobilewright / Patrol / adb·simctl — when to use which
 
 > This doc only covers **selection boundaries** — why these tools exist, what each can and can't do, and which to pick for which scenario.
-> The methodology (element-driven over blind-tap, the Key+Semantics dual-tag, the four verification layers, teardown re-check) lives in `SKILL.md` and is not repeated here.
+> The methodology (element-driven over blind-tap, the Key+Semantics dual-tag, verification layering, teardown re-check) lives in `SKILL.md` and is not repeated here.
 
 ---
 
 ## Memorize this one-liner first
 
-- **Self-driving runs, instant interaction/exploration/diagnosis** → `mobilecli` (already-installed binary, no MCP/restart needed — this is the default hand).
+- **Self-driving runs, instant interaction** (tap, type, swipe) → `mobilecli` (already-installed binary, no MCP/restart needed — this is the default hand; **it is the only one that can tap**).
+- **Diagnosis/evidence** (does the widget exist, which line painted it, are the layout sizes right, did this step error) → **VM Service** (the channel `flutter run` already opened, one curl, **no accessibility-tree dependency** → `vm-service.md`).
 - **Want the MCP tool flow (already registered)** → `mobile-mcp` (same engine, different skin; screenshots save tokens, but config changes only take effect next session).
 - **Want repeatable Flutter assertions, into CI** → `Patrol` (Dart VM by Key, stable on both iOS/Android — Flutter's only reliable deterministic path).
 - **Want repeatable TS scripts / system-level / cross-app / embedded webview** → `mobilewright` (Playwright-style, but **Flutter ⏳ not officially supported**).
@@ -141,6 +142,7 @@ An easy misconception: assuming mobilecli/mobile-mcp can do `getByLabel('X').tap
 | What you want to do | Pick this | Because |
 |---|---|---|
 | **Instant interaction / exploration / diagnosis** in a self-driving run (tap-and-see, navigate, grab crashes, check foreground) | **mobilecli** | already-installed binary, no MCP/restart, shortest loop |
+| **Diagnosis & evidence**: does the widget exist / is the Key spelled right / which line painted it / real layout size / did this step error | **VM Service** | the channel `flutter run` already opened, one curl; **no Semantics dependency**, the widget tree carries `Key` and source line numbers → `vm-service.md` |
 | Want to go through the **MCP tool flow** (already registered / want screenshots to save tokens / orchestrate with other MCPs) | **mobile-mcp** | same engine, different skin; but config takes effect next session, no foreground check / no fs |
 | **Repeatable Flutter UI/integration assertions** (regression, CI, want pass/fail) | **Patrol** | Dart VM by Key, Flutter's only reliable deterministic path |
 | **Repeatable TS scripts / system-level / cross-app / embedded webview** (and target is not Flutter canvas) | **mobilewright** | Playwright-style locator + auto-wait + reporter + CI; **Flutter ⏳ not supported** |
@@ -149,3 +151,5 @@ An easy misconception: assuming mobilecli/mobile-mcp can do `getByLabel('X').tap
 | **Pure canvas blind-tap** (inside charts etc. with no Semantics at all) | **adb** (Android) / **simctl·WDA** (iOS) | last resort; as long as there's Semantics, always go element-driven |
 
 > Ordering mantra: **if mobilecli can do it don't spin up MCP, if element-driven works don't blind-tap, if you need regression bring in Patrol, never bet Flutter assertions on mobilewright.**
+>
+> And one more, equally important: **to tap use mobilecli, for evidence use VM Service, for regression use Patrol** — the three are a division of labor, not substitutes. When a widget can't be found, the layout is wrong, or you suspect an error, check the VM Service first instead of eyeballing screenshots; and **whatever can be proven offline — interaction and visuals alike — shouldn't reach a device at all** (see the widget test / golden layers in `offline-test-layer.md`).

@@ -27,8 +27,12 @@ List, item by item, the boundaries to handle, each with a corresponding acceptan
 
 ### At which layer should this requirement be verified (think it through before starting)
 - Pure logic (parsing / numerics / state machine / error handling) → mark "offline fixture"; list the ones that can be locked down in seconds via `flutter test` without going on-device.
-- Must be verified on a real device / simulator (rendering, navigation, real interaction) → mark "device layer".
+- Interaction / navigation / conditional rendering → can be marked "widget test" to weave a long-term regression net (**this does not replace looking at it on a device**).
+- Repeated visual regression across theme × font scale → can be marked "golden".
+- Must be verified on a real device / simulator (real rendering, real-device interaction timing, system integration, real data) → mark "device layer".
 - Connection / state machine / gating → mark "evidence from logs".
+
+> **If this requirement touched UI at all, at least one acceptance criterion must land in "device layer: run it for real + verify by screenshot"**. Offline all-green cannot prove it works well on a real device — it runs headless, without the real rendering pipeline.
 
 ### List of widgets that need Key + Semantics added / supplemented
 Every interactive or assertable widget that enters the acceptance criteria goes in the table; custom gesture widgets (`Touchable`/`GestureDetector`/`InkWell`) must explicitly wrap `Semantics`, otherwise `dump ui` won't list them — flag these separately.

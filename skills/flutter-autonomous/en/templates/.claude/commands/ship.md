@@ -1,12 +1,12 @@
 ---
-description: Fully autonomous delivery of a single feature: define criteria → implement → four-layer verification → fix → screenshot → (handle the commit per the user's commit policy)
+description: Fully autonomous delivery of a single feature: define criteria → implement → layered verification (offline first, then device) → fix → screenshot → (handle the commit per the user's commit policy)
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 argument-hint: [one-line requirement, including "what done looks like"]
 ---
 
 Requirement: $ARGUMENTS
 
-**Execute fully autonomously.** **Green zone** work — do it and keep going; **red-line** operations (real money / secrets & credentials / irreversible destruction, plus the project CLAUDE.md's project-specific red lines) are **denied by default** — do them only with explicit upfront user authorization (this run's instructions or the project CLAUDE.md's `{{AUTHORIZED_REDLINE_EXCEPTIONS}}`); if unauthorized, skip that item and mark "authorization needed" in the report. Only stop when the device is physically disconnected (after one self-recovery attempt) or when the requirement has an ambiguity you cannot resolve on your own. Rules, lookup priority, the Key+Semantics dual-standard, hot reload tiers, and the two teardown steps all align with the `flutter-autonomous` skill; this command only drives the flow. **Committing is not a default action** — handle it per the user's commit policy (see Step 5).
+**Execute fully autonomously.** **Green zone** work — do it and keep going; **red-line** operations (real money / secrets & credentials / irreversible destruction, plus the project CLAUDE.md's project-specific red lines) are **denied by default** — do them only with explicit upfront user authorization (this run's instructions, or authorized exceptions written in the project CLAUDE.md); if unauthorized, skip that item and mark "authorization needed" in the report. Only stop when the device is physically disconnected (after one self-recovery attempt) or when the requirement has an ambiguity you cannot resolve on your own. Rules, lookup priority, the Key+Semantics dual-standard, hot reload tiers, and the two teardown steps all align with the `flutter-autonomous` skill; this command only drives the flow. **Committing is not a default action** — handle it per the user's commit policy (see Step 5).
 
 ---
 
@@ -27,23 +27,24 @@ If the requirement itself has an ambiguity you cannot resolve on your own (don't
 
 ---
 
-## Step 3: Four-layer verification (fixed order, ≤5 rounds of self-fixing)
+## Step 3: Layered verification (fixed order, ≤5 rounds of self-fixing)
 
 Each round:
 
 ```bash
 flutter analyze                       # ① continue only at zero warnings
-flutter test                          # ② offline fixture layer (seconds, no device; skip if no test/) — green first, then go to device
+flutter test                          # ② offline layer: pure logic + widget test + golden/a11y in one run (skip if no test/)
 mobilecli devices                     # ③ device discovery (don't hardcode id; iOS defaults to simulator, see references/ios.md)
 mobilecli apps foreground --device <id>   # before entering the device, confirm foreground = target package, to prevent cross-talk
 patrol test -t integration_test/<feature>_test.dart --device <deviceId>   # ④ device layer: Patrol by Key
 ```
 
-- Offline layer (②) failure = pure logic bug, fix the implementation per category C below, **do not weaken assertions**, only go to device once offline is fully green.
+- Offline layer (②) failure = a logic/behavior/visual-contract bug: fix the implementation per category C below, **do not weaken assertions**; only go to the device once offline is fully green.
+- If a golden fails, read `test/failures/*_isolatedDiff.png` first to judge whether the change was intended — **only then `--update-goldens`**.
 - Devices all empty: if it's still empty after one round of environment bootstrap self-recovery = offline, stop and report.
 - **Failure categories** (assertion failure = change implementation, not the test):
   - A compile failure → read the full analyze output and fix, back to round start
-  - B `found 0 widgets` → check Key spelling / conditional rendering / whether `.scrollTo()` is needed; can't be listed = back to the code to add `Semantics`
+  - B `found 0 widgets` → **first pull the widget tree from the VM Service to check the Key** (`ext.flutter.inspector.getRootWidgetSummaryTree`, carries source line numbers — see the skill's `references/vm-service.md` §3.1) → then check conditional rendering / whether `.scrollTo()` is needed; a widget `dump ui` won't list = back to the code to add `Semantics` + add a `meetsGuideline` self-check
   - C assertion failure → logic bug, fix the implementation, don't lower the bar
   - D crash/timeout → `mobilecli device crashes list/get` to read the first `package:<your_app>/` line of the stack
   - E install/disconnect → `mobilecli devices` retry once, stop if it still fails
@@ -66,7 +67,7 @@ mobilecli apps terminate --device <id> <packageName>
 mobilecli apps foreground --device <id>            # verify it's actually closed
 ```
 
-**Committing is not a default action of this flow**: handle it per the user's commit policy (ask up front before starting / see the `{{COMMIT_POLICY}}` in the project `CLAUDE.md`) — commit incrementally / commit everything together once done / don't commit (the human commits themselves) / other. **Do not auto-commit by default.** If the policy is to commit, the conventions follow the user's global / project `CLAUDE.md` (precise `git add`, not `git add .`; conventional message; for text containing backticks/`$`/`!` use single quotes or `-F`; never add an AI attribution footer; whether to push depends on the policy), and after committing run `git log -1 --stat` to verify HEAD actually moved.
+**Committing is not a default action of this flow**: handle it per the user's commit policy (ask up front before starting / see the commit policy in the project `CLAUDE.md`) — commit incrementally / commit everything together once done / don't commit (the human commits themselves) / other. **Do not auto-commit by default.** If the policy is to commit, the conventions follow the user's global / project `CLAUDE.md` (precise `git add`, not `git add .`; conventional message; for text containing backticks/`$`/`!` use single quotes or `-F`; never add an AI attribution footer; whether to push depends on the policy), and after committing run `git log -1 --stat` to verify HEAD actually moved.
 
 ---
 

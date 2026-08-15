@@ -62,7 +62,7 @@ Idempotent detect → install → re-verify for every dependency (`mobilecli`, `
 bash ~/.claude/skills/flutter-autonomous/setup-project.sh /path/to/your/flutter-app
 ```
 
-Installs into your project: a `CLAUDE.md` "constitution" (package ids auto-detected and filled in), a permission allowlist + auto format/analyze hooks, and five slash commands. Never overwrites existing files — conflicts are placed alongside for manual merge.
+Installs a permission allowlist + auto format/analyze hooks and five slash commands. It writes **only into `.claude/`** — your project root is untouched, and nothing needs configuring before you start. Never overwrites existing files — conflicts are placed alongside for manual merge.
 
 ### 4. Put it to work
 
@@ -120,14 +120,13 @@ skills/flutter-autonomous/
 │   ├── tool-decision-tree.md# when to use mobilecli / mobile-mcp / mobilewright / Patrol
 │   └── scaling.md           # trust ladder, parallel worktrees, overnight unattended runs
 ├── templates/               # installed into YOUR project by setup-project.sh
-│   ├── CLAUDE.md            # project constitution ({{placeholders}} auto-filled)
 │   └── .claude/             # permission allowlist, format/analyze hooks,
 │                            # /spec /ship /verify /debug /nightly commands
 ├── en/                      # full English mirror of SKILL.md + references + templates
 └── setup-project.sh         # one-command project wiring
 ```
 
-The skill is **fully project-agnostic**: package ids, devices, dart-defines, log anchors and business red lines are never hardcoded — they're auto-detected or read from your project's `CLAUDE.md`.
+The skill is **fully project-agnostic and needs no configuration**: package ids and entry points are auto-detected, and the device is taken live at runtime. What only a human knows — log anchors, hard toolchain requirements, project red lines, commit policy — you just say in the conversation; write it into your own `CLAUDE.md` only if you want it to persist across sessions (worth doing before unattended runs, where nobody can be asked).
 
 ## Platform support
 
@@ -155,7 +154,7 @@ No. Committing is explicitly **not this skill's job**: it asks for your commit p
 <details>
 <summary><b>Is it safe to run unattended?</b></summary>
 
-Red lines are **denied by default and unlocked only by explicit upfront authorization**: operations that spend real money (payments, transfers, on-chain transactions…), secret/credential operations, and irreversible destruction are never performed unless you explicitly allowed them up front — in the run's instructions or the project CLAUDE.md's `{{AUTHORIZED_REDLINE_EXCEPTIONS}}`, with scope stated (e.g. "sandbox payments may place orders"). An unattended run that hits an unauthorized red-line operation doesn't hang waiting for you — it skips the item, flags "authorization needed" in the report, and moves on. A physically offline device (after one self-recovery attempt) is the one hard stop. Project-specific red lines (a marketplace's real orders, a wallet's seed phrases) go in `{{IRREVERSIBLE_REDLINES}}` and are enforced the same way. Everything else (installing tools, scaffolding tests, fixing failures) is reversible and handled autonomously. See [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) for the trust ladder — start by watching one run, then let go gradually.
+Red lines are **denied by default and unlocked only by explicit upfront authorization**: operations that spend real money (payments, transfers, on-chain transactions…), secret/credential operations, and irreversible destruction are never performed unless you explicitly allowed them up front — in the run's instructions, or written into your project `CLAUDE.md`, with scope stated (e.g. "sandbox payments may place orders"). An unattended run that hits an unauthorized red-line operation doesn't hang waiting for you — it skips the item, flags "authorization needed" in the report, and moves on. A physically offline device (after one self-recovery attempt) is the one hard stop. Project-specific red lines (a marketplace's real orders, a wallet's seed phrases) are enforced the same way once you state them. Note the direction this fails in: with nothing written down, all four red lines stay fully in force — the absence of configuration can only make a run more conservative, never less. Everything else (installing tools, scaffolding tests, fixing failures) is reversible and handled autonomously. See [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) for the trust ladder — start by watching one run, then let go gradually.
 </details>
 
 <details>
@@ -173,6 +172,13 @@ Yes. Patrol tests live in the standard `integration_test/`, offline tests in `te
 ## Contributing
 
 Issues and PRs welcome. The Chinese `SKILL.md` is the source of truth; the `en/` mirror is synced after changes. Keep `SKILL.md` under ~500 lines — depth goes in `references/`.
+
+Before opening a PR, run the mirror check — "sync it afterwards" is an honor-system rule that has silently failed before, leaving English users on behavior the Chinese side had already dropped:
+
+```bash
+bash tools/check-mirror.sh              # every zh file has an en counterpart, structurally aligned
+bash tools/check-mirror.sh --diff main  # this branch never changes one side alone
+```
 
 ## License
 

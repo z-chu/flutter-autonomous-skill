@@ -99,6 +99,88 @@ Per the keystone "verification four layers · layer 4 evidence", grep key anchor
 
 ---
 
+## 4.1 Assert against a "log window" (harder than grepping everything)
+
+The problem with grepping the whole `logcat` is that you can't tell whether a line came from *this* step or is left over from the previous one. **Slice the log into windows, one per action** — only then does the assertion hold:
+
+```bash
+"$ADB" -s <id> logcat -c                                   # 1) clear the buffer: this marks the window start
+mobilecli io tap --device <id> <cx>,<cy>                   # 2) perform 【one】 action
+sleep 1
+"$ADB" -s <id> logcat -d --pid="$PID" -s flutter > win.log # 3) take only this step's log
+grep -qE "<expected anchor>" win.log && echo PASS || echo FAIL   # 4) assert against the window
+```
+
+- `-d` dumps and exits (not long-running); combined with `-c` it gives you a clean window.
+- `--pid="$PID"` prevents cross-talk (§3); use them together.
+- **Have the app emit machine-readable anchors**, so assertions don't have to regex human-readable text:
+
+  ```dart
+  dev.log('{"evt":"order_submitted","id":"$id"}', name: 'e2e');   // dart:developer
+  ```
+
+  On the assertion side: `grep -o '{.*}' win.log | jq -e 'select(.evt=="order_submitted")'`. The anchor strings themselves belong in the project `CLAUDE.md`.
+- **A harder error assertion** is in `vm-service.md` §4: `errorsSinceReload` covers every error type at once, so you don't write one grep per error kind.
+
+---
+
+## 4.2 Determinism switches: kill animations before screenshotting/tapping
+
+Screenshots and taps both drift while animations are running — the number-one source of device-layer flake. **Turn off system animations before running cases** (reversible, green zone):
+
+```bash
+for k in window_animation_scale transition_animation_scale animator_duration_scale; do
+  "$ADB" -s <id> shell settings put global $k 0
+done
+```
+
+**You must restore and re-check at teardown** (same severity as the §10 network cut — leaving the user's device with no animations is a teardown incident):
+
+```bash
+"$ADB" -s <id> shell settings put global window_animation_scale 1.0
+"$ADB" -s <id> shell settings put global transition_animation_scale 1.0
+"$ADB" -s <id> shell settings delete global animator_duration_scale   # this one may be unset by default
+"$ADB" -s <id> shell settings get global window_animation_scale       # re-check: confirm it's restored
+```
+
+> **Read the original value before changing a setting**, and write that value back on restore — don't assume the default is 1.0. Measured: on some models `animator_duration_scale` is unset (`null`) to begin with, and those need `settings delete` rather than writing 1.0.
+
+Other controllable determinism / scenario switches (also restore + re-check when done):
+
+```bash
+"$ADB" -s <id> shell settings put system font_scale 1.3           # layout verification at large font scale
+"$ADB" -s <id> shell cmd uimode night yes|no                      # system-level dark mode
+"$ADB" -s <id> shell pm grant|revoke <applicationId> <permission> # deterministic setup for permission flows
+```
+
+> For dark-mode verification, prefer `brightnessOverride` from `vm-service.md` §3.5 — **no system setting changed, nothing to restore** — cleaner than `cmd uimode`.
+
+---
+
+## 4.3 Quantified metrics: startup time and jank (assertable numbers)
+
+Beyond visuals and interaction there's one more dimension: **performance can be part of the acceptance criteria**, and it's numeric — no human judgment needed.
+
+```bash
+# Cold-start time: measure after a force-stop; TotalTime is the assertable millisecond figure
+"$ADB" -s <id> shell am force-stop <applicationId>
+"$ADB" -s <id> shell am start -W -n <applicationId>/.MainActivity | grep -E "TotalTime|LaunchState"
+# → LaunchState: COLD / TotalTime: 1725
+
+# Jank: read after running an interaction; gives the janky ratio and percentiles
+"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> reset      # zero it first
+# …perform the interaction under test…
+"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> \
+  | grep -E "Total frames|Janky frames|90th|95th|99th"
+# → Janky frames: 1 (33.33%) / 90th percentile: 109ms
+```
+
+- `dumpsys gfxinfo` statistics are **cumulative**; without a `reset` first you're reading a mix going back to boot, and the assertion is meaningless.
+- How to use it: write "first-screen TotalTime < X ms" and "janky ratio < Y%" into the acceptance criteria, and the autonomous loop can judge pass/fail on its own — far more actionable than "feels a bit laggy". Thresholds are project-specific: put them in the project `CLAUDE.md`.
+- For a deeper timeline, use `flutter run --profile --trace-to-file=<path>` (Perfetto proto format).
+
+---
+
 ## 5. Teardown: force-stop ≠ kill flutter run (must re-check)
 
 `kill flutter run` only severs the host process; the App on the device keeps running (keystone hard principle). To really close the App:
@@ -190,5 +272,6 @@ mobilecli io tap --device <id> <toggle-rect-center>                # flip it; sh
 ```
 
 - **The teardown iron rule, network edition**: if you cut the network, "network restored" becomes part of teardown re-check — prove it with an independent command (`ping -c 1 8.8.8.8` succeeds, or `dumpsys connectivity` shows an Active default network); don't treat "I ran enable" as "network is back". **Leaving the user's device offline is a teardown incident**, no less serious than leaving the app running.
+- **The network inside `adb shell` ≠ the app's network**: `adb shell curl/ping` goes through the device's **raw network stack**, **bypassing the TUN set up by any VPN/proxy app on the phone**. So using it to decide "can the app reach this domain" can give you the exact opposite of what the app sees — with a proxy running, `adb shell` can't connect while the app is perfectly fine (and vice versa). **Judge reachability from the app's own evidence**: request outcomes in the logs, state read via the VM Service; use `adb shell` only to verify the **physical link** (is there an Active default network). Get this backwards once and you'll go fix a network bug that doesn't exist, or report a healthy network as "restricted".
 - On a SIM-less test device Wi-Fi is the only path (check `getprop gsm.sim.state`) — there is no mobile-data fallback if recovery fails, so re-check until ping succeeds.
 - Test-design tip: data already loaded in memory **does not disappear** when you cut the network; to trigger an "empty data + load failure" state you usually need to switch to a not-yet-loaded resource (new symbol / new page) and observe. A cold start while offline may be blocked by an upstream error wall before you ever reach the target page — switching resources is more controllable than cold-starting.

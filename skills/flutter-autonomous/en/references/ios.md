@@ -185,6 +185,47 @@ After WDA fetches the device's accessibility tree, it **only keeps** elements th
 
 ---
 
+### 3.2 Determinism switches (simulator only; the precondition for comparable screenshots/goldens)
+
+A simulator lets you pin down the system chrome that would otherwise differ on every run, which is what makes screenshots comparable to each other and to a baseline. **These are all reversible simulator state — green zone — but they still must be cleared at teardown.**
+
+```bash
+# Pin the status bar: fixed time/signal/battery, otherwise every screenshot's status bar differs
+xcrun simctl status_bar <udid> override --time "9:41" --batteryLevel 100 \
+  --cellularBars 4 --wifiBars 3 --dataNetwork wifi
+xcrun simctl status_bar <udid> list      # re-check the current override
+xcrun simctl status_bar <udid> clear     # teardown: clear it
+
+# System-level light/dark
+xcrun simctl ui <udid> appearance dark|light
+xcrun simctl ui <udid> appearance        # no argument = read the current value (read before changing, to restore later)
+
+# Record video as evidence (leaves a reviewable trace of an unattended run)
+xcrun simctl io <udid> recordVideo --codec h264 /path/run.mov   # Ctrl-C to stop
+```
+
+Key points:
+
+- **The status-bar override is the precondition for visual verification / golden comparison on iOS**: without pinning the time and signal, two screenshots always differ and the diff is all noise.
+- **For dark-mode verification, prefer `brightnessOverride` from `vm-service.md` §3.5** — it affects only the app itself, dies on restart, and needs no restoring; `simctl ui appearance` changes the whole simulator's state, so **read the original value before changing it and write it back at teardown**.
+- **Real devices have none of this**: `status_bar override` / `ui appearance` are simulator-only. Visual verification on a real device must either accept status-bar differences or crop the status bar before comparing.
+- The recording isn't for the AI (it can't read video) — it's evidence for a **human** to review in the morning. To let the AI see the middle of the run, extract frames with `ffmpeg -i run.mov -vf fps=1 frame_%03d.png` and Read a few.
+
+**The iOS log window** (the counterpart of `android.md` §4.1 — slice the log into per-action windows, then assert):
+
+```bash
+# Long-running stream (start it in a separate background Bash; don't block the main thread)
+xcrun simctl spawn <udid> log stream --style json \
+  --predicate 'processImagePath CONTAINS "Runner"' > win.log
+# Or: look back at the last stretch after performing an action (no long-running process)
+xcrun simctl spawn <udid> log show --last 30s --style json \
+  --predicate 'processImagePath CONTAINS "Runner"' > win.log
+```
+
+`--style json` produces a machine-readable structure, more robust than parsing human-readable logs; have the app emit single-line JSON anchors with `dev.log('{"evt":...}', name: 'e2e')` and assert with jq.
+
+---
+
 ## 4. iOS vs Android capability differences (avoid using the wrong command)
 
 | Capability | iOS real device/simulator | Alternative |

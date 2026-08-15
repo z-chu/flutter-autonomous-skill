@@ -62,7 +62,7 @@ bash ~/.claude/skills/flutter-autonomous/scripts/bootstrap.sh
 bash ~/.claude/skills/flutter-autonomous/setup-project.sh /path/to/your/flutter-app
 ```
 
-往你的项目里装：`CLAUDE.md` 项目宪法（applicationId / bundleId 自动探测回填）、权限白名单 + 自动 format/analyze hook、5 个斜杠命令。**绝不覆盖已有文件** —— 冲突的会放在旁边等你手动合并。
+往你的项目里装：权限白名单 + 自动 format/analyze hook、5 个斜杠命令。**只往 `.claude/` 里写**，项目根一个文件都不动，开跑前也不需要你配置任何东西。**绝不覆盖已有文件** —— 冲突的会放在旁边等你手动合并。
 
 ### 第 4 步：开干
 
@@ -108,7 +108,7 @@ bash ~/.claude/skills/flutter-autonomous/scripts/bootstrap.sh
 bash ~/.claude/skills/flutter-autonomous/setup-project.sh ~/你的flutter项目
 ```
 
-然后打开项目里新生成的 `CLAUDE.md`，把没被自动填上的 `{{...}}` 占位补一下（不会填的留着，Claude 会自动探测）。
+**然后就可以开跑了，不用配任何东西**——包名、两端 id、入口 Claude 自己探，设备运行期现取。只有人才知道的事（日志锚点、工具链硬要求、项目特有红线、提交策略）直接在对话里说一句就行；想让它跨会话生效，再写进你自己的 `CLAUDE.md`。**要跑无人值守**（`/nightly`、`/schedule`）前建议先写下**项目特有红线**和**提交策略**——那时没人可问，AI 只按写下来的办。
 
 **5. 连上一台设备**：启动一个 Android 模拟器 / iOS 模拟器，或用数据线插上真机（Android 要开 USB 调试）。
 
@@ -165,7 +165,7 @@ flowchart LR
 
 **一个交互底座。** iOS（WebDriverAgent / `xcrun simctl`）与 Android（`adb`）的差异全部被 [`mobilecli`](https://github.com/mobile-next/mobilecli) 抹平 —— 方法论写一遍，双端通用。平台细节见 [`references/ios.md`](skills/flutter-autonomous/references/ios.md) 与 [`references/android.md`](skills/flutter-autonomous/references/android.md)。
 
-**硬规则，不靠感觉。** skill 自带 Always/Never 契约：绝不猜元素名（先检视再动手）、绝不改测试降标准来"通过"、绝不没回查就报完成、能自己修的绝不停下要人 —— 并且红线**默认禁止、你事先明确授权才做**：花真钱的操作（支付/转账/上链）、密钥或凭证操作、不可逆破坏；无人值守遇到未授权的直接跳过并标注「需授权」，绝不卡住等人。项目特有红线与授权例外都写在项目 CLAUDE.md 里。
+**硬规则，不靠感觉。** skill 自带 Always/Never 契约：绝不猜元素名（先检视再动手）、绝不改测试降标准来"通过"、绝不没回查就报完成、能自己修的绝不停下要人 —— 并且红线**默认禁止、你事先明确授权才做**：花真钱的操作（支付/转账/上链）、密钥或凭证操作、不可逆破坏；无人值守遇到未授权的直接跳过并标注「需授权」，绝不卡住等人。项目特有红线与授权例外在对话里说，或写进你自己的项目 CLAUDE.md。
 
 ## 仓库结构
 
@@ -185,14 +185,13 @@ skills/flutter-autonomous/
 │   ├── tool-decision-tree.md# mobilecli / VM Service / mobile-mcp / mobilewright / Patrol 何时用哪个
 │   └── scaling.md           # 信任阶梯、worktree 并行、整晚无人值守
 ├── templates/               # setup-project.sh 装进你项目的模板
-│   ├── CLAUDE.md            # 项目宪法（{{占位}} 自动探测回填）
 │   └── .claude/             # 权限白名单、format/analyze hook、
 │                            # /spec /ship /verify /debug /nightly 五个命令
 ├── en/                      # SKILL.md + references + templates 的完整英文镜像
 └── setup-project.sh         # 一条命令接入项目
 ```
 
-skill 完全**项目无关**：包名、设备、dart-define、日志锚点、业务红线一律不写死 —— 自动探测或从你项目的 `CLAUDE.md` 读。中文是 source of truth，`en/` 镜像随中文同步。
+skill 完全**项目无关、零配置**：包名与两端 id 自动探测，设备运行期现取。只有人才知道的（日志锚点、工具链硬要求、项目红线、提交策略）在对话里说，或写进你自己的 `CLAUDE.md` 让它跨会话生效。中文是 source of truth，`en/` 镜像随中文同步。
 
 ## 平台支持
 
@@ -214,7 +213,7 @@ skill 完全**项目无关**：包名、设备、dart-define、日志锚点、�
 <details>
 <summary><b>无人值守安全吗？</b></summary>
 
-红线采取**默认禁止、授权才做**：花真钱的操作（支付、转账、上链交易等）、密钥或凭证操作、不可逆破坏，除非你**事先明确授权**（本次指令或项目 CLAUDE.md 的 `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` 写明允许哪类、什么范围，如「沙箱支付可下单」），否则一律不做；无人值守中遇到未授权的红线操作不会傻等你回复——跳过并在报告里标注「需授权」，继续下个任务。设备物理掉线则自救一次仍失败才停。你项目特有的红线（比如电商的真实下单、区块链的私钥助记词）写在项目 CLAUDE.md 的 `{{IRREVERSIBLE_REDLINES}}` 里，skill 一并遵守。其余（装工具、scaffold 测试、修失败）都是可逆操作，自主完成。建议按 [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) 的"信任阶梯"来：先盯一两次完整闭环，再逐级放手。
+红线采取**默认禁止、授权才做**：花真钱的操作（支付、转账、上链交易等）、密钥或凭证操作、不可逆破坏，除非你**事先明确授权**（本次指令，或写进项目 CLAUDE.md，写明允许哪类、什么范围，如「沙箱支付可下单」），否则一律不做；无人值守中遇到未授权的红线操作不会傻等你回复——跳过并在报告里标注「需授权」，继续下个任务。设备物理掉线则自救一次仍失败才停。你项目特有的红线（比如电商的真实下单、区块链的私钥助记词）说一句或写进项目 CLAUDE.md，skill 一并遵守。注意它的失效方向：**什么都不写时，四条红线全部照旧生效**——没有配置只会让 AI 更保守，不会更危险。其余（装工具、scaffold 测试、修失败）都是可逆操作，自主完成。建议按 [`references/scaling.md`](skills/flutter-autonomous/references/scaling.md) 的"信任阶梯"来：先盯一两次完整闭环，再逐级放手。
 </details>
 
 <details>
@@ -238,6 +237,13 @@ skill 按「渐进披露」设计：常驻上下文的只有几十字的 descrip
 ## 参与贡献
 
 欢迎 Issue 和 PR。中文 `SKILL.md` 是 source of truth，改完同步 `en/` 镜像；`SKILL.md` 保持 500 行内，深度内容进 `references/`。
+
+提 PR 前跑一下镜像检查——「改完记得同步」是靠自觉的约定，而它已经悄悄失效过一次：英文用户拿到的是中文侧早已否定的行为，仓库里却看不出任何异常：
+
+```bash
+bash tools/check-mirror.sh              # 每个中文文件都有结构对齐的英文镜像
+bash tools/check-mirror.sh --diff main  # 本分支没有出现「只改一边」
+```
 
 ## 许可
 
