@@ -1,58 +1,58 @@
 ---
-description: 把一句话需求展开成可断言的验收标准，确认后再实现（纯思考，不写代码）
-argument-hint: [一句话需求]
+description: Expand a one-line requirement into assertable acceptance criteria, then implement only after confirmation (pure thinking, no code)
+argument-hint: [one-line requirement]
 ---
 
-我要实现：$ARGUMENTS
+I want to implement: $ARGUMENTS
 
-请先**不要写任何代码、不碰文件、不上设备**。这一步只产出一份可执行的验收契约，等我回复「确认 / 开始」后才进入实现。
-术语、定位优先级、Key+Semantics 双标的写法都对齐 `flutter-autonomous` skill，本命令不复述方法论，只产出本需求的展开结果。
+First, **do not write any code, do not touch files, do not go on-device**. This step only produces an executable acceptance contract; only after I reply "confirm / start" do we enter implementation.
+Terminology, locator priority, and the Key+Semantics dual-tagging convention all align with the `flutter-autonomous` skill; this command does not restate the methodology, it only produces the expansion of this requirement.
 
 ---
 
-### 用户故事
-谁（用户角色）在哪个页面，做了什么操作，期望得到什么结果。一句话讲清楚价值。
+### User story
+Who (user role) is on which page, does what action, and expects what result. State the value in one sentence.
 
-### 可自动验证的验收条件（3~8 条）
+### Automatically verifiable acceptance criteria (3~8 items)
 
-每条都要**可断言**——优先能被 Patrol 按 `Key` 复跑，其次能被元素驱动（`dump ui` 列出 `Semantics` label）一次性核验。格式：
+Each must be **assertable** — preferably re-runnable by Patrol via `Key`, otherwise verifiable one-shot via element-driven (`dump ui` lists the `Semantics` label). Format:
 
-- **操作**：找到 `Key('xxx')` 或 label「xxx」→ tap / 输入 / 滚动到 / 等待
-- **预期**：某 widget 出现 / 消失 / 文字变成 xxx / 跳转到页面 xxx（用页面根 `Key` 判断在不在某页）
+- **Action**: find `Key('xxx')` or label "xxx" → tap / type / scroll to / wait
+- **Expected**: some widget appears / disappears / text becomes xxx / navigates to page xxx (use the page-root `Key` to judge whether on a given page)
 
-> 写不成「操作→预期」的条目说明它不可验证，要么拆细，要么挪到下面的「人工核验项」。
+> An item that cannot be written as "Action→Expected" is unverifiable — either break it down, or move it to the "Manual verification items" below.
 
-### 边界 / 异常情况
-逐条列要处理的边界，并各自给一条对应的验收预期：网络错误、空数据 / 空列表、加载中、权限拒绝、输入校验、超时回退等。**只列真实会发生的**，不为不可能的场景设计错误处理。
+### Boundary / edge cases
+List, item by item, the boundaries to handle, each with a corresponding acceptance expectation: network error, empty data / empty list, loading, permission denied, input validation, timeout fallback, etc. **List only what really happens**; do not design error handling for impossible scenarios.
 
-### 这条需求该落在哪层验证（开工前先想清楚）
-- 纯逻辑（解析 / 数值 / 状态机 / 错误处理）→ 标「离线 fixture」，能在 `flutter test` 秒级锁住、不必占真机时间的列出来。
-- 交互 / 跳转 / 条件渲染 → 可标「widget test」织一张长期回归网（**不替代上设备看**）。
-- 视觉在主题 × 字号下的重复回归 → 可标「golden」。
-- 必须真机 / 模拟器才能验的（真实渲染观感、真机交互时序、系统集成、真实数据）→ 标「设备层」。
-- 连接 / 状态机 / gating → 标「看日志取证」。
+### At which layer should this requirement be verified (think it through before starting)
+- Pure logic (parsing / numerics / state machine / error handling) → mark "offline fixture"; list the ones that can be locked down in seconds via `flutter test` without going on-device.
+- Interaction / navigation / conditional rendering → can be marked "widget test" to weave a long-term regression net (**this does not replace looking at it on a device**).
+- Repeated visual regression across theme × font scale → can be marked "golden".
+- Must be verified on a real device / simulator (real rendering, real-device interaction timing, system integration, real data) → mark "device layer".
+- Connection / state machine / gating → mark "evidence from logs".
 
-> **只要这条需求动了 UI，验收条件里必须至少有一条落在「设备层：上设备真跑 + 截图核验」**。离线层全绿证明不了真机上好不好用——它跑在无头环境，不经真实渲染管线。
+> **If this requirement touched UI at all, at least one acceptance criterion must land in "device layer: run it for real + verify by screenshot"**. Offline all-green cannot prove it works well on a real device — it runs headless, without the real rendering pipeline.
 
-### 需要新增 / 补 Key + Semantics 的控件清单
-凡进入验收条件的可交互或可断言控件都要上表；自定义手势控件（`Touchable`/`GestureDetector`/`InkWell`）必须显式包 `Semantics`，否则 `dump ui` 列不出，单独标注。
+### List of widgets that need Key + Semantics added / supplemented
+Every interactive or assertable widget that enters the acceptance criteria goes in the table; custom gesture widgets (`Touchable`/`GestureDetector`/`InkWell`) must explicitly wrap `Semantics`, otherwise `dump ui` won't list them — flag these separately.
 
-| Key 名（`<功能>_<控件类型>`） | 控件类型 | Semantics label | 用途 / 对应验收条件 |
+| Key name (`<feature>_<widget type>`) | Widget type | Semantics label | Purpose / corresponding acceptance criterion |
 |--------|---------|-----------------|------|
-| `login_submit_btn` | ElevatedButton | 文本自带 | 触发登录，条件 1 |
-| `error_text` | Text | 文本自带 | 显示错误信息，条件 3 |
-| `home_screen` | Scaffold(页面根) | — | 判断已跳转到首页，条件 2 |
-| `swap_slide_btn` | GestureDetector(需显式包 Semantics) | `滑动买入` | 自绘滑块，条件 4 |
+| `login_submit_btn` | ElevatedButton | from text | Triggers login, criterion 1 |
+| `error_text` | Text | from text | Shows error message, criterion 3 |
+| `home_screen` | Scaffold (page root) | — | Judge navigation to home, criterion 2 |
+| `swap_slide_btn` | GestureDetector (must explicitly wrap Semantics) | `Slide to buy` | Custom-drawn slider, criterion 4 |
 
-### 涉及的文件
-- `lib/.../xxx.dart`：新建 / 修改 + 一句话说明改什么
-- `integration_test/<feature>_test.dart`：新建 Patrol 用例（对应上面验收条件）
-- `test/.../xxx_test.dart`：若有可离线锁的纯逻辑，列出 fixture 单测
+### Files involved
+- `lib/.../xxx.dart`: create / modify + one-line note on what changes
+- `integration_test/<feature>_test.dart`: create Patrol test case (matching the acceptance criteria above)
+- `test/.../xxx_test.dart`: if there is offline-lockable pure logic, list the fixture unit tests
 
-### 人工核验项（不可自动断言的）
-列出只能肉眼看的：视觉观感、动画手感、文案措辞等。这些走截图，不进 Patrol。
+### Manual verification items (not automatically assertable)
+List the eyeball-only ones: visual look, animation feel, copy wording, etc. These go through screenshots, not Patrol.
 
 ---
 
-输出后**停下等我确认**。我回复「确认 / 开始」前不进入实现。
-需求本身有歧义（缺关键信息、不知道跳哪页、UI 不明确、平台不明确）就**先问清楚再展开**，不要默默替我决定。
+After output, **stop and wait for my confirmation**. Do not enter implementation until I reply "confirm / start".
+If the requirement itself is ambiguous (missing key info, unclear which page to navigate to, unclear UI, unclear platform), **ask first before expanding** — do not silently decide for me.

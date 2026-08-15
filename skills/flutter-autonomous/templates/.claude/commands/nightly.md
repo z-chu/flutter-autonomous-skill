@@ -1,80 +1,80 @@
 ---
-description: 整晚自主模式——按顺序逐个走完整 ship 流程，卡住/歧义跳过继续，结束出汇总表（提交按用户策略，默认不 push）
+description: All-night autonomous mode — run the full ship flow over each task in order, skip-and-continue on stuck/ambiguous, emit a summary table at the end (commit per the user's policy, no push by default)
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
-argument-hint: [任务清单（每行一个任务）]
+argument-hint: [task list (one task per line)]
 ---
 
-**整晚自主任务清单：**
+**All-night autonomous task list:**
 
 $ARGUMENTS
 
-规则、定位优先级、Key+Semantics 双标、失败分类、收尾两步全部对齐 `flutter-autonomous` skill；**提交不是默认动作**，按用户提交策略处理。本命令是 `/ship` 的批量编排，只补「整晚调度」差异。
+Rules, locator priority, the Key+Semantics dual annotation, failure classification, and the two-step teardown all align with the `flutter-autonomous` skill; **committing is not a default action** — handle it per the user's commit policy. This command is the batch orchestration of `/ship`; it only fills in the "all-night scheduling" differences.
 
 ---
 
-## 调度规则
+## Scheduling rules
 
-1. **严格按顺序**逐个处理，**不并行**（同一代码库并行会撞文件、抢设备、串台）。
-2. **每个任务走完整 `/ship` 流程**：定标准 → 实现(+Key+Semantics+配套测试) → 分层验证（先离线后设备）→ 截图核验 →（按用户提交策略处理提交，不默认自动提交）。
-3. **卡住上限**：每任务自修复 ≤5 轮。第 5 轮仍失败 → 标 ⚠️、记已试方向，**跳过，继续下一个**。
-4. **遇歧义**：任务描述本身有无法自决的歧义（不知跳哪页 / UI 不明确 / 平台不明确）→ 标 ⚠️、**跳过，继续下一个**，不要默默替我决定。任务需要**未授权的红线操作**（花真钱 / 密钥凭证 / 不可逆）同样标 ⚠️ 跳过，报告注明需要什么授权——**不要卡住等我回复**。
-5. **设备离线**：环境自举自救 + 重连**一次**仍失败 → **停止所有剩余任务**，输出「设备离线」报告（已完成的 commit 保留）。
-6. **提交按用户提交策略**（开工前问清：增量提 / 干完再提 / 不提 / 其它）；默认 **不 push**，等人工早上 review。
+1. **Strictly in order**, one at a time, **no parallelism** (parallel runs against the same codebase collide on files, contend for the device, and cross-talk).
+2. **Each task runs the full `/ship` flow**: set the criteria → implement (+Key+Semantics+matching tests) → four-layer verification → screenshot verification → (handle committing per the user's commit policy, no auto-commit by default).
+3. **Stuck ceiling**: ≤5 self-repair rounds per task. Still failing on the 5th round → mark ⚠️, record the directions already tried, **skip and continue to the next**.
+4. **On ambiguity**: the task description itself has ambiguity you cannot resolve on your own (unsure which page to jump to / unclear UI / unclear platform) → mark ⚠️, **skip and continue to the next**, don't silently decide for me. A task requiring an **unauthorized red-line operation** (real money / secrets / irreversible) is likewise marked ⚠️ and skipped, noting in the report what authorization is needed — **never hang waiting for my reply**.
+5. **Device offline**: if environment self-bootstrap/recovery + one reconnect still fails → **stop all remaining tasks**, emit a "device offline" report (any commits already made are kept).
+6. **Commit per the user's commit policy** (clarify up front: commit-as-you-go / one at the end / don't commit / other); **no push** by default, wait for human review in the morning.
 
 ---
 
-## 每个任务的执行流程
+## Per-task execution flow
 
 ```
-对于任务 N：
-  1. 定验收标准（自己确认，不等人）；歧义→标 ⚠️ 跳过
-  2. 实现 + 配套测试（关键控件加 Key+Semantics；自定义手势控件显式包 Semantics）
-  3. flutter analyze（零警告）
-  4. flutter test（离线 fixture 层，秒级无设备；无 test/ 跳过）——离线层失败=逻辑 bug 修实现、不降断言，先绿再上设备
-  5. mobilecli devices（设备发现，不写死 id）→ apps foreground 确认前台=目标包
-  6. patrol test -t integration_test/<feature>_test.dart --device <id>（iOS 默认模拟器，见 references/ios.md）
-     ├── 通过 → 截图核验 → 收尾两步(kill 宿主 + apps terminate)并回查 →（按提交策略处理提交）→ 记录 → 任务 N+1
-     └── 失败 → 失败分类(A编译/B found0/C断言改实现不改测试/D crash读堆栈/E断连重试一次)修复 → 回步骤 3（≤5 轮）
-                第 5 轮仍失败 → 标 ⚠️ 记已试方向 → 任务 N+1
+For task N:
+  1. Set acceptance criteria (confirm yourself, don't wait on anyone); ambiguous → mark ⚠️ skip
+  2. Implement + matching tests (add Key+Semantics to key widgets; wrap custom gesture widgets explicitly in Semantics)
+  3. flutter analyze (zero warnings)
+  4. flutter test (offline fixture layer, sub-second no device; skip if no test/) — offline-layer failure = logic bug, fix the implementation, don't weaken the assertion; go green first, then move to device
+  5. mobilecli devices (device discovery, don't hardcode the id) → apps foreground confirm foreground = target package
+  6. patrol test -t integration_test/<feature>_test.dart --device <id> (iOS default simulator, see references/ios.md)
+     ├── pass → screenshot verification → two-step teardown (kill host + apps terminate) and recheck → (handle committing per the commit policy) → record → task N+1
+     └── fail → failure classification (A compile / B found 0 / C assertion: fix implementation not test / D crash: read the stack trace / E disconnect: retry once) fix → back to step 3 (≤5 rounds)
+                still failing on 5th round → mark ⚠️ record directions tried → task N+1
 ```
 
-> 提交按用户策略（增量 / 最后 / 不提）；**默认不自动提交**。若提交，规范以用户全局 / 项目 `CLAUDE.md` 为准（精确 `add` 不用 `git add .`、message 含反引号/`$`/`!` 用**单引号**或 `-F`、**绝不加 AI 署名**），提交后 `git log -1 --stat` 回查 HEAD。每个任务收尾都跑两步关 App 并回查，避免下个任务串台。
+> Commit per the user's policy (as-you-go / at the end / don't commit); **no auto-commit by default**. If committing, follow the user's global/project `CLAUDE.md` for conventions (precise `add`, no `git add .`; single quotes or `-F` for messages with backticks/`$`/`!`; **never add AI attribution**), then `git log -1 --stat` to recheck HEAD. Run the two App-close steps and recheck at the end of every task to avoid cross-talk with the next task.
 
 ---
 
-## 整晚结束后：汇总报告
+## After all-night ends: summary report
 
 ```
-# 整晚任务汇总报告
-完成时间：<时间>
-设备：<mobilecli devices 现取的 id/平台>
+# All-night task summary report
+Completion time: <time>
+Device: <id/platform freshly obtained from mobilecli devices>
 
-## 任务结果
-| # | 功能 | 状态 | Commit |
-|---|------|------|--------|
-| 1 | 功能名 | ✅ 完成 | abc1234 |
-| 2 | 功能名 | ⚠️ 跳过（5 轮未过 / 歧义 / 需授权） | — |
-| 3 | 功能名 | ✅ 完成 | def5678 |
+## Task results
+| # | Feature | Status | Commit |
+|---|---------|--------|--------|
+| 1 | feature name | ✅ done | abc1234 |
+| 2 | feature name | ⚠️ skipped (5 rounds failed / ambiguous / authorization needed) | — |
+| 3 | feature name | ✅ done | def5678 |
 
-## 详细报告
+## Detailed report
 
-### 任务 1：<功能名> ✅
-验收条件：
-- [x] 条件1
-- [x] 条件2
-改动：xxx.dart, xxx_test.dart
-验证：analyze ✅ / flutter test ✅(N) / patrol ✅(N)
-Commit：abc1234 feat: xxx（已回查 HEAD）
-截图：（关键截图）
+### Task 1: <feature name> ✅
+Acceptance criteria:
+- [x] criterion 1
+- [x] criterion 2
+Changes: xxx.dart, xxx_test.dart
+Verification: analyze ✅ / flutter test ✅(N) / patrol ✅(N)
+Commit: abc1234 feat: xxx (HEAD rechecked)
+Screenshots: (key screenshots)
 
-### 任务 2：<功能名> ⚠️ 跳过
-原因：<5 轮失败现象 + 错误原文 / 歧义说明>
-已尝试：<简述方向>
-建议：<下一步怎么处理>
+### Task 2: <feature name> ⚠️ skipped
+Reason: <5-round failure symptom + verbatim error / ambiguity note>
+Tried: <brief directions>
+Suggestion: <how to handle next>
 
 ---
 
-## 需要人工决策的点
-1. <具体问题>
-2. （无则写：无）
+## Points needing human decision
+1. <specific question>
+2. (if none, write: none)
 ```

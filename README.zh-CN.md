@@ -187,11 +187,12 @@ skills/flutter-autonomous/
 ├── templates/               # setup-project.sh 装进你项目的模板
 │   └── .claude/             # 权限白名单、format/analyze hook、
 │                            # /spec /ship /verify /debug /nightly 五个命令
-├── en/                      # SKILL.md + references + templates 的完整英文镜像
+├── zh/                      # SKILL.md + references + templates 的完整中文副本
+│                            # （先改这里，再同步进上面的英文正本）
 └── setup-project.sh         # 一条命令接入项目
 ```
 
-skill 完全**项目无关、零配置**：包名与两端 id 自动探测，设备运行期现取。只有人才知道的（日志锚点、工具链硬要求、项目红线、提交策略）在对话里说，或写进你自己的 `CLAUDE.md` 让它跨会话生效。中文是 source of truth，`en/` 镜像随中文同步。
+skill 完全**项目无关、零配置**：包名与两端 id 自动探测，设备运行期现取。只有人才知道的（日志锚点、工具链硬要求、项目红线、提交策略）在对话里说，或写进你自己的 `CLAUDE.md` 让它跨会话生效。**对外分发的是英文正本**（顶层 `SKILL.md` / `references/` / `templates/`，也是 Claude 实际加载的那份）；`zh/` 是维护者的工作语言，改完中文再同步到英文。
 
 ## 平台支持
 
@@ -236,12 +237,12 @@ skill 按「渐进披露」设计：常驻上下文的只有几十字的 descrip
 
 ## 参与贡献
 
-欢迎 Issue 和 PR。中文 `SKILL.md` 是 source of truth，改完同步 `en/` 镜像；`SKILL.md` 保持 500 行内，深度内容进 `references/`。
+欢迎 Issue 和 PR。**英文是对外正本**——`skills/flutter-autonomous/SKILL.md` 及其 `references/`、`templates/` 才是 Claude 实际加载的那份；`zh/` 是维护者的工作语言，改动先落中文，再同步进英文。直接提英文 PR 完全欢迎，不必附带 `zh/` 改动——说一声即可，中文侧事后补齐。`SKILL.md` 保持 500 行内，深度内容进 `references/`。
 
 提 PR 前跑一下镜像检查——「改完记得同步」是靠自觉的约定，而它已经悄悄失效过一次：英文用户拿到的是中文侧早已否定的行为，仓库里却看不出任何异常：
 
 ```bash
-bash tools/check-mirror.sh              # 每个中文文件都有结构对齐的英文镜像
+bash tools/check-mirror.sh              # 每个 zh/ 文件都有结构对齐的英文正本
 bash tools/check-mirror.sh --diff main  # 本分支没有出现「只改一边」
 ```
 

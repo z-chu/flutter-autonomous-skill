@@ -1,124 +1,117 @@
 ---
-description: 验证当前改动——按改动类型选最硬证据，先离线后设备跑分层闭环，失败分类自修复 ≤5 轮
+description: Verify the current change — pick the hardest evidence by change type, run the layered loop (offline first, then device), classify failures and self-fix in ≤5 rounds
 allowed-tools: Bash(flutter:*), Bash(flutter run:*), Bash(dart:*), Bash(patrol:*), Bash(adb:*), Bash(xcrun:*), Bash(kill:*), Bash(ps:*), Bash(mobilecli:*), Bash(npx mobilecli:*), Bash(bash scripts/tap-by-label.sh:*), Read, Edit, Write, Grep, Glob
-argument-hint: [验证用例文件路径（可选，不填则跑 integration_test/ 全部）]
+argument-hint: [path to the verification test file (optional; if omitted, runs all of integration_test/)]
 ---
 
-对当前改动做验证。规则、定位优先级、Key+Semantics 双标、收尾两步全部对齐 `flutter-autonomous` skill，本命令只走流程不复述方法论。
+Verify the current change. The rules, location priority, the dual Key+Semantics annotation, and the two teardown steps all align with the `flutter-autonomous` skill; this command only runs the flow and does not restate the methodology.
 
-## 第 0 步：按改动类型选「最硬证据」
+## Step 0: pick the "hardest evidence" by change type
 
-**改了 UI 的一律要上设备真跑一次并截图**（`flutter test` 全绿 ≠ UI 对）。下表只用来决定「除了上设备看，还该把回归网织在哪层」，**不是用来免掉上设备的**：
+**Anything that changed UI must be run on a device once and screenshotted** (`flutter test` all-green ≠ the UI is right). The table below only decides "besides going to look on a device, which layer should own the regression net" — it is **not** a way to skip the device:
 
-| 改动类型 | 最硬证据 | 要设备吗 |
+| Change type | Hardest evidence | Device? |
 |---------|---------|---|
-| 纯逻辑（解析 / 数值 / 状态机 / 错误处理） | **离线 fixture**：`flutter test`，秒级 | 否 |
-| 控件交互 / 页面跳转 / 表单校验 / 条件渲染 | **widget test**：`testWidgets` + `tester.tap` + 按 `Key` 断言 | **否**（这条最容易被误判成要设备） |
-| 视觉 / 布局 / 颜色 / 深色模式 / 大字号 | **golden 矩阵**：`matchesGoldenFile`，出量化 diff + 只画变化区域的图 | 否 |
-| 可交互控件有没有 label / 热区 / 对比度 | **a11y guideline**：`meetsGuideline(labeledTapTargetGuideline)` 等 | 否 |
-| 控件找不到 / Key 对不对 / 布局真实尺寸 / 这步报没报错 | **VM Service**：一行 curl 取 widget 树（带源码行号）、render 树、`errorsSinceReload` | 是（但不用点） |
-| WebSocket / RPC 连接、状态机切换、gating 逻辑 | **日志**：清缓冲 → 执行动作 → 只读这一步的日志窗口再断言 | 是 |
-| 真机渲染观感 / 系统集成 / 真实数据 | **元素驱动 + 截图**：`dump ui`→点 rect 中心，或 `bash scripts/tap-by-label.sh <id> "<label>"` | 是 |
-| 需要精确、可复跑、进 CI 的断言 | **Patrol**：按 `Key`，出 pass/fail | 是 |
+| Pure logic (parsing / numerics / state machine / error handling) | **Offline fixture**: `flutter test`, sub-second | No |
+| Widget interaction / navigation / form validation / conditional rendering | **widget test**: `testWidgets` + `tester.tap` + assertions by `Key` | **No** (the row most often misjudged as needing a device) |
+| Visual / layout / color / dark mode / large font scale | **golden matrix**: `matchesGoldenFile`, gives a quantified diff + an image of only the changed region | No |
+| Whether tappable widgets have a label / hit area / contrast | **a11y guideline**: `meetsGuideline(labeledTapTargetGuideline)` etc. | No |
+| Widget can't be found / is the Key right / real layout size / did this step error | **VM Service**: one curl for the widget tree (with source line numbers), render tree, `errorsSinceReload` | Yes (but no tapping) |
+| WebSocket / RPC connection, state-machine transitions, gating logic | **Logs**: clear the buffer → perform the action → assert against only that step's log window | Yes |
+| Real-device rendering / system integration / real data | **Element-driven + screenshot**: `dump ui` → tap the rect center, or `bash scripts/tap-by-label.sh <id> "<label>"` | Yes |
+| Assertions that must be precise, repeatable, and CI-ready | **Patrol**: by `Key`, emits pass/fail | Yes |
 
-混合改动就组合用。**别为了跑而跑 Patrol；纯逻辑 bug 也别占真机时间去定位。但只要这次动了 UI，就必须上设备真跑 + 截图核验——不许拿「离线全绿」结案。**
+For mixed changes, combine them. **Don't run Patrol just for the sake of running it, and don't spend real-device time locating a pure-logic bug either. But if this change touched UI at all, you must run it on a device and verify by screenshot — closing it out on "offline all-green" is not allowed.**
 
 ---
 
-## 第 1 步：分层闭环（顺序固定，离线层全绿才上设备）
+## Step 1: the layered loop (fixed order — go on-device only once the offline layer is all green)
 
 ```bash
-# ① 静态：零警告才继续
+# ① Static: only continue at zero warnings
 flutter analyze
 
-# ② 离线层（秒级，无设备）——纯逻辑 + widget test + golden/a11y 一把跑完
-#    这里失败 = 逻辑 / 行为 / 视觉契约 bug，不上设备，直接按「失败分类 C」修实现。
-flutter test                 # 无 test/ 目录时跳过此步
+# ② Offline layer (sub-second, no device) — pure logic + widget test + golden/a11y, all in one run
+#    A failure here = a logic / behavior / visual-contract bug; don't go on-device, fix the implementation directly per "failure class C".
+flutter test                 # skip this step when there's no test/ directory
 
-# ③ 设备发现（绝不写死 id；iOS 默认目标模拟器，细节见 references/ios.md）
-mobilecli devices            # 空再退 adb devices / xcrun simctl list devices booted
+# ③ Device discovery (never hardcode the id; iOS defaults to the target simulator, details in references/ios.md)
+mobilecli devices            # if empty, fall back to adb devices / xcrun simctl list devices booted
 ```
 
-- analyze 有警告 / 离线层失败：**先修再继续**，离线层全绿才上设备。
-- golden 失败先读 `test/failures/*_isolatedDiff.png`（只画变化区域）判断这次视觉变化是否预期；**是预期才 `flutter test --update-goldens`**，无脑更新 = 改测试绕过断言。
-- 设备都空：按 skill 的环境自举自救一次（`adb kill-server && adb start-server` / `xcrun simctl boot <udid>`）；仍空=设备物理掉线，**停止，输出「设备离线」报告，不进循环**。
+- analyze has warnings / offline layer fails: **fix first, then continue**; only go on-device once the offline layer is fully green.
+- If a golden fails, read `test/failures/*_isolatedDiff.png` first (it paints only the changed region) to judge whether this visual change was intended; **only then run `flutter test --update-goldens`** — a blind update is editing tests to dodge assertions.
+- All devices empty: do one round of the skill's environment self-bootstrap recovery (`adb kill-server && adb start-server` / `xcrun simctl boot <udid>`); still empty = device physically disconnected, **stop, output a "device offline" report, do not enter the loop**.
 
-进设备前先确认前台是目标包，防串台：`mobilecli apps foreground --device <id>`。
+Before going on-device, confirm the foreground is the target package to prevent cross-talk: `mobilecli apps foreground --device <id>`.
 
 ```bash
-# ④ 设备层（按第 0 步选的证据执行其一或组合）
-# 4a 元素驱动（一次性交互/跳转/展示）
-bash scripts/tap-by-label.sh <deviceId> "<label子串>"        # 或手动 dump ui→io tap rect 中心
-mobilecli screenshot --device <deviceId> -o <out>           # 截图 → Read 核验
+# ④ Device layer (run one or a combination, per the evidence picked in Step 0)
+# 4a Element-driven (one-off interaction/navigation/display)
+bash scripts/tap-by-label.sh <deviceId> "<label substring>"   # or manually dump ui → io tap rect center
+mobilecli screenshot --device <deviceId> -o <out>             # screenshot → Read to verify
 
-# 4b Patrol（精确、可复跑回归）——$ARGUMENTS 有路径跑指定文件，否则全量
-patrol test -t $ARGUMENTS --device <deviceId>               # 不填路径则省去 -t
+# 4b Patrol (precise, repeatable regression) — if $ARGUMENTS has a path, run that file; otherwise run all
+patrol test -t $ARGUMENTS --device <deviceId>                 # omit -t if no path given
 ```
 
 ---
 
-## 第 2 步：失败分类自修复（≤5 轮）
+## Step 2: classify failures and self-fix (≤5 rounds)
 
-**断言失败=逻辑 bug，修实现，绝不改测试降标准。** 第 3 轮记下已试方向，第 4 轮换思路，第 5 轮停下出卡住报告。
+**An assertion failure = a logic bug; fix the implementation, never edit the test to lower the bar.** By round 3 note the directions already tried, by round 4 switch approach, by round 5 stop and output a stuck report.
 
-- **A 编译 / 构建失败**：读**完整** `flutter analyze` 输出（不只看末行），修代码，回第 1 步。构建反复失败 `flutter clean && flutter pub get` 再来。
-- **B `found 0 widgets`**：**先用 VM Service 把当前 widget 树拉出来核对**（带 `Key` 和源码行号，比翻代码快）：
-  ```bash
-  VM=$(sed 's|^ws://|http://|; s|/ws$|/|' <URI_FILE>); ISO=$(curl -s "${VM}getVM" | jq -r '.result.isolates[0].id')
-  curl -s "${VM}ext.flutter.inspector.getRootWidgetSummaryTree?isolateId=${ISO}&objectGroup=ai" \
-   | jq -r '[.result.result] | .. | objects | select(.description? and .createdByLocalProject?)
-            | "\(.description)  ←  \(.creationLocation.file | split("/") | last):\(.creationLocation.line)"'
-  ```
-  再查 `Key` 拼写 → 条件渲染（`isLoading?`/`isVisible?`）→ 是否要先 `.scrollTo()`。控件 `dump ui` 列不出 = 没暴露 Semantics，**回代码补 `Semantics(label:)`** 并补一条 `meetsGuideline(labeledTapTargetGuideline)` 让它以后自动被拦住，别将就盲点。
-- **C 断言失败（expect 不符）**：逻辑 bug，读实现修，**不降断言标准**。
-- **D crash / 超时**：`mobilecli device crashes list --device <id>` → `... crashes get <crash_id> --device <id>`，读堆栈第一个 `package:<your_app>/` 的行，修那段。
-- **E 安装 / 断连**：`mobilecli devices` 确认状态，重试一次仍失败则停止报告。
+- **A Compile / build failure**: read the **full** `flutter analyze` output (not just the last line), fix the code, go back to Step 1. If the build keeps failing, do `flutter clean && flutter pub get` and retry.
+- **B `found 0 widgets`**: check `Key` spelling → check conditional rendering (`isLoading?`/`isVisible?`) → check whether you need to `.scrollTo()` first. A widget that `dump ui` won't list = no exposed Semantics, **go back to the code and add `Semantics(label:)`**, don't settle for a blind-tap.
+- **C Assertion failure (expect mismatch)**: a logic bug, read the implementation and fix, **do not lower the assertion bar**.
+- **D crash / timeout**: `mobilecli device crashes list --device <id>` → `... crashes get <crash_id> --device <id>`, read the first stack line in `package:<your_app>/`, fix that spot.
+- **E install / disconnect**: `mobilecli devices` to confirm status; retry once, and if it still fails, stop and report.
 
-**第 5 轮仍未通过**：
+**Still not passing after round 5**:
 ```
-⚠️ 验证失败（已尝试 5 轮）
-失败的断言/现象：<具体>
-错误原文：<原始信息>
-已尝试方向：1. ... 2. ...
-判断：<根因推测 + 需人工决策的点>
+⚠️ Verification failed (tried 5 rounds)
+Failed assertion/symptom: <specifics>
+Raw error: <original message>
+Directions tried: 1. ... 2. ...
+Assessment: <root-cause hypothesis + points needing human decision>
 ```
 
 ---
 
-## 第 3 步：通过后取证 + 收尾
+## Step 3: gather evidence after passing + teardown
 
-- 视觉类改动：`mobilecli screenshot` 截图 Read 核验布局/截断/颜色/空态/Loading。
-- **收尾两步并回查**（`kill flutter run` ≠ 关 App）：
+- Visual changes: `mobilecli screenshot`, then Read to verify layout/truncation/color/empty state/Loading.
+- **Two teardown steps, with a re-check** (`kill flutter run` ≠ closing the App):
 ```bash
-kill "$(cat <PID_FILE>)" 2>/dev/null                       # 停 flutter run 宿主
-mobilecli apps terminate --device <id> <packageName>       # 真关 App（抹平 Android/iOS）
-mobilecli apps foreground --device <id>                    # 回查：确认前台已不是目标 App
+kill "$(cat <PID_FILE>)" 2>/dev/null                       # stop the flutter run host
+mobilecli apps terminate --device <id> <packageName>       # actually close the App (smooths over Android/iOS)
+mobilecli apps foreground --device <id>                    # re-check: confirm the foreground is no longer the target App
 ```
-**宣布「验过 / 关好」前必须用独立命令回查真实状态**，不拿「执行了 kill」当「App 关了」。
+**Before declaring "verified / closed", you must re-check the real state with an independent command**, don't treat "I ran kill" as "the App is closed".
 
 ---
 
-## 最终报告
+## Final report
 
 ```
-## 验证结果：✅ 全绿 / ❌ 部分失败
+## Verification result: ✅ all green / ❌ partial failure
 
-### 用的证据
-- 连接/状态机 → 日志：<grep 命中>
-- 交互/跳转 → 元素驱动 / Patrol
-- 视觉 → 截图
+### Evidence used
+- connection/state machine → logs: <grep hits>
+- interaction/navigation → element-driven / Patrol
+- visual → screenshot
 
-### 验收条件
-- [x] 条件1
-- [ ] 条件3（失败说明）
+### Acceptance criteria
+- [x] Criterion 1
+- [ ] Criterion 3 (failure note)
 
-### 改动
-- lib/xxx.dart：原因
-- integration_test/xxx_test.dart：原因
+### Changes
+- lib/xxx.dart: reason
+- integration_test/xxx_test.dart: reason
 
-### 截图
-（关键截图）
+### Screenshots
+(key screenshots)
 
-### 遗留（需人工决策）
-无 / <具体内容>
+### Outstanding (needs human decision)
+None / <specifics>
 ```

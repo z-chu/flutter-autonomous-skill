@@ -1,155 +1,155 @@
-# 工具选型:mobilecli / mobile-mcp / mobilewright / Patrol / adb·simctl 何时用
+# Tool selection: mobilecli / mobile-mcp / mobilewright / Patrol / adb·simctl — when to use which
 
-> 本文只讲**选型边界**——为什么有这几把工具、各自能做不能做什么、什么场景挑哪把。
-> 方法论(元素驱动优先于盲点、Key+Semantics 双标、验证分层、收尾回查)在 `SKILL.md`,这里不复述。
-
----
-
-## 一句话先记住
-
-- **自主跑、即时交互**(要点、要输入、要滑) → `mobilecli`(已装二进制,免 MCP/重启,这是默认手;**只有它能点**)。
-- **诊断/取证**(控件在不在、哪行代码画的、布局尺寸对不对、这步报没报错) → **VM Service**(`flutter run` 已开的通道,一行 curl,**不依赖无障碍树** → `vm-service.md`)。
-- **想用 MCP 工具流(已注册)** → `mobile-mcp`(同引擎换皮,截图省 token,但改配置下次会话才生效)。
-- **要可复跑的 Flutter 断言、进 CI** → `Patrol`(Dart VM 按 Key,iOS/Android 都稳——Flutter 唯一可靠确定性路径)。
-- **要 TS 可复跑脚本 / 系统级 / 跨 app / 内嵌 webview** → `mobilewright`(Playwright 风,但 **Flutter ⏳ 未正式支持**)。
-- **纯 canvas 盲点(无任何 Semantics)** → `adb`(Android)/ `simctl`·WDA(iOS),**末选**。
+> This doc only covers **selection boundaries** — why these tools exist, what each can and can't do, and which to pick for which scenario.
+> The methodology (element-driven over blind-tap, the Key+Semantics dual-tag, verification layering, teardown re-check) lives in `SKILL.md` and is not repeated here.
 
 ---
 
-## ★ 同源同底座:三者都跑在 mobilecli 之上
+## Memorize this one-liner first
 
-mobilecli、mobile-mcp、mobilewright 都来自 **mobile-next**,共用同一套设备引擎:
+- **Self-driving runs, instant interaction** (tap, type, swipe) → `mobilecli` (already-installed binary, no MCP/restart needed — this is the default hand; **it is the only one that can tap**).
+- **Diagnosis/evidence** (does the widget exist, which line painted it, are the layout sizes right, did this step error) → **VM Service** (the channel `flutter run` already opened, one curl, **no accessibility-tree dependency** → `vm-service.md`).
+- **Want the MCP tool flow (already registered)** → `mobile-mcp` (same engine, different skin; screenshots save tokens, but config changes only take effect next session).
+- **Want repeatable Flutter assertions, into CI** → `Patrol` (Dart VM by Key, stable on both iOS/Android — Flutter's only reliable deterministic path).
+- **Want repeatable TS scripts / system-level / cross-app / embedded webview** → `mobilewright` (Playwright-style, but **Flutter ⏳ not officially supported**).
+- **Pure canvas blind-tap (no Semantics at all)** → `adb` (Android) / `simctl`·WDA (iOS), **last resort**.
+
+---
+
+## ★ Same origin, same base: all three run on top of mobilecli
+
+mobilecli, mobile-mcp, and mobilewright all come from **mobile-next** and share one device engine:
 
 ```
-                  ┌─ mobile-mcp     (MCP 协议封装,~23 个 mobile_ 工具)
-mobilecli  ───────┼─ mobilewright   (Playwright 风 TS 框架,driver-mobilecli 走 WS JSON-RPC)
-(设备引擎/CLI/HTTP·WS server)        其余直接用 mobilecli CLI 或 HTTP/WS API
+                  ┌─ mobile-mcp     (MCP protocol wrapper, ~23 mobile_ tools)
+mobilecli  ───────┼─ mobilewright   (Playwright-style TS framework, driver-mobilecli over WS JSON-RPC)
+(device engine/CLI/HTTP·WS server)        the rest use mobilecli CLI or HTTP/WS API directly
 ```
 
-含义:
-- 三者**能力天花板一致**——底层都是同一引擎对接 iOS(WebDriverAgent / simctl / 真机 agent)与 Android(adb / UI Automator)。上层只是**交付形态**不同:CLI / MCP 工具 / TS locator。
-- 选型本质是选**交付形态**,不是选"谁能做到":能用 mobilecli 一行命令搞定的,不必为它启 MCP 或写 TS。
-- mobilecli 可作 server 跑(`mobilecli server start`,默认端口 12000,HTTP `/rpc` + WS `/ws`,JSON-RPC 2.0)。**推荐起 server 形态**:它能缓存、保活隧道,显著加快与设备/模拟器的反复交互。mobilewright 的 driver-mobilecli 就是连这个 WS。
+Implications:
+- The three have an **identical capability ceiling** — the underlying layer is the same engine talking to iOS (WebDriverAgent / simctl / on-device agent) and Android (adb / UI Automator). The upper layers only differ in **delivery form**: CLI / MCP tools / TS locator.
+- Selection is essentially choosing a **delivery form**, not choosing "who can do it": if a one-line mobilecli command does it, don't spin up MCP or write TS for it.
+- mobilecli can run as a server (`mobilecli server start`, default port 12000, HTTP `/rpc` + WS `/ws`, JSON-RPC 2.0). **Running it in server form is recommended**: it caches and keeps the tunnel alive, significantly speeding up repeated interaction with the device/simulator. mobilewright's driver-mobilecli connects to exactly this WS.
 
 ---
 
-## mobilecli —— 自主即时交互 / 探索 / 诊断的默认手
+## mobilecli — the default hand for self-driving instant interaction / exploration / diagnosis
 
-**为什么默认**:已装就是个二进制,**不依赖 MCP 注册、不需要重启会话**,装好立刻能用;坐标级 `dump ui` → `io tap` 闭环最短,适合"自己点、自己看、流畅推进"。
+**Why default**: once installed it's just a binary, **does not depend on MCP registration, needs no session restart** — usable immediately after install; the coordinate-level `dump ui` → `io tap` loop is the shortest, ideal for "tap it yourself, look yourself, keep moving smoothly".
 
-### 命令面:只记环境查不到的那部分
+### Command surface: only the parts the environment can't tell you
 
-**完整命令面查 `mobilecli --help` / `mobilecli <域> --help`**,那是唯一不会过期的来源。这里只列**帮助里看不出的坑与用法**:
+**For the full command surface run `mobilecli --help` / `mobilecli <domain> --help`** — that's the one source that never goes stale. Listed here are only the traps and usages `--help` won't reveal:
 
-| 命令 | 帮助里看不出的部分 |
+| Command | What `--help` won't tell you |
 |---|---|
-| `devices` | 输出是 JSON `{status,data:{devices:[…]}}`,取 `.data.devices[0].id`;`--include-offline` 才含未启的模拟器 |
-| `device crashes list` / `crashes get <id>` | 失败分类的入口:读堆栈第一行 `package:<your_app>/` 定位。三端实现不同(iOS 真机 crashreport service / 模拟器 DiagnosticReports / Android 解析 `logcat -b crash`),命令已抹平 |
-| `device url <deeplink>` | **深链跳关**——直达页面,省掉逐级导航,是最被低估的一条 |
-| `apps terminate` | Android=force-stop / iOS=simctl terminate,已抹平。**`kill flutter run` 不等于它** |
-| `apps foreground` | **防串台校验**:返回的 `packageName` 必须=目标包,截图/点击前先查 |
-| `apps path <bundleId>` | **仅 Android**;iOS 拿容器路径只能靠它,没有 `fs` 任意路径 |
-| `io tap x,y` | 坐标取 `dump ui` 的 rect 中心,**不盲猜、不写死历史坐标** |
-| `io text '文本'` | 只喂系统输入框。**Flutter 自绘键盘/自定义手势控件喂不进** → 逐键 `io tap`;Android 非 ASCII 需先装 on-device agent |
-| `io button <KEY>` | **BACK / DPAD 仅 Android**;iOS 无 BACK,用手势或点导航栏返回控件 |
-| `dump ui` | 返回**设备物理像素** rect,直接用无需换算;iOS 上 stderr 有大量隧道日志——**别写 `2>&1`**,会污染 JSON |
-| `fs ls/pull/push/rm` | **仅 Android + iOS 模拟器**;`/data/user/` 需 app 可调试 |
-| `webview query <css>` / `eval <js>` | **只作用 webview DOM**,不作用原生控件,更不作用 Flutter Semantics 树(最常见的误解,见文末) |
-| `agent install [--provisioning-profile]` | **iOS 触控/截流/UI 树必需**;Android 仅非 ASCII 输入需要。真机 profile 直接用 app 自身的 `embedded.mobileprovision` |
-| `server start [--listen :12000]` | 起 HTTP `/rpc` + WS `/ws`,**缓存 + 保活隧道,显著加快反复交互**——反复点同一台设备时值得起 |
+| `devices` | Output is JSON `{status,data:{devices:[…]}}`, take `.data.devices[0].id`; only `--include-offline` includes unbooted simulators |
+| `device crashes list` / `crashes get <id>` | The entry point for failure classification: read the first `package:<your_app>/` line of the stack. Three different backends (iOS device crashreport service / simulator DiagnosticReports / Android `logcat -b crash`), already smoothed over |
+| `device url <deeplink>` | **Deep-link jump** — lands directly on a screen, skipping step-by-step navigation; the most underrated command here |
+| `apps terminate` | Android=force-stop / iOS=simctl terminate, already smoothed over. **`kill flutter run` is not this** |
+| `apps foreground` | **Cross-talk check**: the returned `packageName` must equal the target package — check before screenshotting/tapping |
+| `apps path <bundleId>` | **Android only**; on iOS this is the only way to a container path, there is no arbitrary-path `fs` |
+| `io tap x,y` | Take the center of the `dump ui` rect — **never blind-guess, never hardcode historical coordinates** |
+| `io text 'text'` | System input fields only. **Flutter's self-drawn keyboard / custom gesture widgets won't accept it** → tap key-by-key; non-ASCII on Android needs the on-device agent first |
+| `io button <KEY>` | **BACK / DPAD are Android only**; iOS has no BACK — use a gesture or tap the nav-bar back control |
+| `dump ui` | Returns **device physical pixel** rects, usable as-is with no conversion; on iOS stderr carries heavy tunnel logging — **never write `2>&1`**, it corrupts the JSON |
+| `fs ls/pull/push/rm` | **Android + iOS simulator only**; `/data/user/` requires the app to be debuggable |
+| `webview query <css>` / `eval <js>` | **Acts only on webview DOM** — not on native widgets, and certainly not on Flutter's Semantics tree (the most common misconception; see the end of this doc) |
+| `agent install [--provisioning-profile]` | **Required for iOS touch/stream/UI tree**; on Android only for non-ASCII input. For a real device just pass the app's own `embedded.mobileprovision` |
+| `server start [--listen :12000]` | Starts HTTP `/rpc` + WS `/ws` — **caches and keeps tunnels alive, markedly faster for repeated interaction**; worth starting when you'll hit the same device many times |
 
-> 几乎所有命令都吃 `--device <id>`;设备 id **运行期从 `mobilecli devices` 现取,绝不写进文件**。
+> Almost every command takes `--device <id>`; the device id is **fetched live at runtime from `mobilecli devices`, never written into a file**.
 
 ---
 
-## mobile-mcp —— 同引擎 MCP 化(可选;改配置下次会话才生效)
+## mobile-mcp — same engine, MCP-ified (optional; config changes take effect next session)
 
-**是什么**:把同一套引擎封装成 MCP server,暴露 ~23 个 `mobile_` 工具(`mobile_list_elements_on_screen` / `mobile_click_on_screen_at_coordinates` / `mobile_launch_app` / `mobile_take_screenshot` / `mobile_swipe_on_screen` / `mobile_type_keys` / `mobile_press_button` / `mobile_open_url` / `mobile_list_crashes` / ...)。能力等价 mobilecli。
+**What it is**: wraps the same engine as an MCP server, exposing ~23 `mobile_` tools (`mobile_list_elements_on_screen` / `mobile_click_on_screen_at_coordinates` / `mobile_launch_app` / `mobile_take_screenshot` / `mobile_swipe_on_screen` / `mobile_type_keys` / `mobile_press_button` / `mobile_open_url` / `mobile_list_crashes` / ...). Capability equivalent to mobilecli.
 
-**什么时候用它而不是 mobilecli**:
-- 想让交互走 MCP 工具流(被工具调用记录/复用、与其它 MCP 编排在一起)。
-- 截图想省 token:`mobile_take_screenshot` **内置压缩**,比 mobilecli 原图省。
+**When to use it instead of mobilecli**:
+- You want interaction to go through the MCP tool flow (recorded/reused as tool calls, orchestrated alongside other MCPs).
+- Screenshots to save tokens: `mobile_take_screenshot` has **built-in compression**, leaner than mobilecli's raw image.
 
-**注册**(Claude Code):
+**Registration** (Claude Code):
 ```bash
 claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest
 ```
-> ⚠️ **改 MCP 配置 = 下次会话才连**。本会话别因为"还没注册"就退回盲点 adb——先用 mobilecli 顶上,注册留给下次。
+> ⚠️ **Changing MCP config = it only connects next session**. Don't fall back to blind-tap adb this session just because "it's not registered yet" — use mobilecli to cover now, leave registration for next time.
 
-**坑与边界(相对 mobilecli 要补位)**:
-- **无前台校验工具**:没有 `apps foreground` 等价物 → 防串台仍回退 `mobilecli apps foreground` 或 Android `dumpsys`。
-- **无 fs 工具**:容器读写退回 mobilecli `fs` 或 adb。
-- `mobile_open_url` 开**自定义 scheme** 需放开:`MOBILEMCP_ALLOW_UNSAFE_URLS=1`。
-- **遥测默认开**(PostHog)→ 注册时带 `MOBILEMCP_DISABLE_TELEMETRY=1`:
+**Pitfalls and boundaries (where it must be backed up relative to mobilecli)**:
+- **No foreground-check tool**: no equivalent of `apps foreground` → for cross-talk prevention fall back to `mobilecli apps foreground` or Android `dumpsys`.
+- **No fs tool**: container read/write falls back to mobilecli `fs` or adb.
+- `mobile_open_url` opening a **custom scheme** needs unlocking: `MOBILEMCP_ALLOW_UNSAFE_URLS=1`.
+- **Telemetry on by default** (PostHog) → register with `MOBILEMCP_DISABLE_TELEMETRY=1`:
   ```bash
   claude mcp add mobile-mcp -e MOBILEMCP_DISABLE_TELEMETRY=1 -e MOBILEMCP_ALLOW_UNSAFE_URLS=1 -- npx -y @mobilenext/mobile-mcp@latest
   ```
 
 ---
 
-## mobilewright —— Playwright 风 TS 框架(Flutter ⏳ 未正式支持)
+## mobilewright — Playwright-style TS framework (Flutter ⏳ not officially supported)
 
-**是什么**:Playwright 开发体验搬到移动端,同样跑在 mobilecli 之上(`driver-mobilecli` 走 WS JSON-RPC)。卖点:
-- **语义 locator + auto-wait**:`screen.getByLabel('Email').fill(...)` / `getByRole('button', {name:'Sign In'}).tap()` / `getByTestId(...)`,每个动作自动等元素可见·可用·bounds 稳定,**无需手写 sleep / 坐标**。
-- **断言重试**:`expect(locator).toBeVisible()` 轮询到满足或超时。
-- **reporter**(list/html/json/junit)+ **projects 多设备/多平台矩阵** + **retries** + **CI 友好**(`@mobilewright/test` 扩展 Playwright Test,fixture 化 `device`/`screen`,失败自动截图、可录像)。
-- `npx mobilewright doctor [--json]` 是**现成跨平台体检**(Node / Xcode / Simulators / ADB / Java / mobilecli agent),环境自举可拿它当入口。
+**What it is**: the Playwright dev experience ported to mobile, also running on top of mobilecli (`driver-mobilecli` over WS JSON-RPC). Selling points:
+- **Semantic locator + auto-wait**: `screen.getByLabel('Email').fill(...)` / `getByRole('button', {name:'Sign In'}).tap()` / `getByTestId(...)`, each action auto-waits for the element to be visible·enabled·bounds-stable, **no hand-written sleep / coordinates needed**.
+- **Assertion retry**: `expect(locator).toBeVisible()` polls until satisfied or timeout.
+- **reporter** (list/html/json/junit) + **projects multi-device/multi-platform matrix** + **retries** + **CI-friendly** (`@mobilewright/test` extends Playwright Test, fixtures `device`/`screen`, auto-screenshots on failure, optional recording).
+- `npx mobilewright doctor [--json]` is a **ready-made cross-platform health check** (Node / Xcode / Simulators / ADB / Java / mobilecli agent) — use it as the entry point for environment bootstrapping.
 
-**★ 但对本 skill 的关键限制 —— Flutter ⏳ 未正式支持**:
-- 框架支持表里 **Flutter 在 iOS / Android 双双标 ⏳**(注:Renders via Skia/Impeller, not native views — requires Dart VM Service driver)。Flutter 画 canvas、不出原生视图,mobilewright 的语义 locator 拿不到稳定的原生节点。
-- 即便控件暴露了 Semantics,**Flutter 控件、尤其 iOS 上 `getByRole` 不可靠**(role 映射针对 UIKit/SwiftUI/RN 的原生类型,Flutter 对不上)。
-- 结论:**Flutter 项目内部的 UI 断言不要押在 mobilewright 上**,那是 Patrol 的活。
+**★ But the key limitation for this skill — Flutter ⏳ not officially supported**:
+- In the framework support table, **Flutter is marked ⏳ on both iOS / Android** (note: Renders via Skia/Impeller, not native views — requires Dart VM Service driver). Flutter paints to canvas and emits no native views, so mobilewright's semantic locator can't get stable native nodes.
+- Even if a widget exposes Semantics, **Flutter widgets — especially `getByRole` on iOS — are unreliable** (role mapping targets UIKit/SwiftUI/RN native types, which Flutter doesn't match).
+- Conclusion: **do not bet UI assertions inside a Flutter project on mobilewright** — that's Patrol's job.
 
-**那 mobilewright 在本 skill 里干嘛用**:
-- 写 **TS 可复跑脚本**(团队习惯 Playwright、要 reporter/CI 矩阵,且目标是**原生/RN/webview**而非 Flutter canvas)。
-- **系统级 / 跨 app 流程**(出 Flutter App 去设置页、相册、另一个原生 App 走一段)。
-- **内嵌 webview 内容**(webview 走原生无障碍树,locator 可用)。
-- **`mobilewright doctor`** 作环境体检入口(这条与是否 Flutter 无关,随时能用)。
-
----
-
-## Patrol —— Flutter 唯一可靠的确定性断言路径
-
-**是什么**:Dart VM 直连 widget 树,按 `Key` 精确查找 + `expect` 断言,**iOS / Android 都稳、出 pass/fail、可复跑进 CI**。不依赖系统无障碍树是否暴露——这正是它对 Flutter 比 mobilewright/mobile-mcp 都可靠的根因(它在 Dart 侧看树,不在原生侧看 canvas)。
-
-**什么时候必须是它**:
-- 任何要**回归、要可复跑、要 pass/fail、要进 CI** 的 Flutter UI/集成断言。
-- 元素驱动一次性点过了、但需要固化成长期回归用例时。
-
-**和元素驱动的分工**(都在本 skill 内、互补):
-- 探索期 / 一次性验证 → mobilecli `dump ui`→`io tap`(快,不留资产)。
-- 固化期 / 回归 → Patrol 按 Key(慢一点,留下可复跑用例)。
-- 故两者的代码契约一致:可交互/可断言控件**同时**加 `Key`(给 Patrol)+ `Semantics(label:)`(给元素驱动)。
-
-> 命令与写法模板见 `SKILL.md`「自主开发完整循环」节,这里不复制。
+**So what is mobilewright for within this skill**:
+- Writing **repeatable TS scripts** (team is used to Playwright, wants reporter/CI matrix, and the target is **native/RN/webview** rather than Flutter canvas).
+- **System-level / cross-app flows** (leaving the Flutter App for Settings, Photos, or a stretch through another native App).
+- **Embedded webview content** (webviews go through the native accessibility tree, so the locator works).
+- **`mobilewright doctor`** as the environment health-check entry point (this one is unrelated to Flutter, usable anytime).
 
 ---
 
-## ★ 关键事实:没有"按 label 一步点"的原生命令
+## Patrol — Flutter's only reliable deterministic assertion path
 
-容易踩的误区:以为 mobilecli/mobile-mcp 能像 mobilewright 那样 `getByLabel('X').tap()` 一步到位。**不能**:
+**What it is**: Dart VM directly connected to the widget tree, precise lookup by `Key` + `expect` assertions, **stable on both iOS / Android, produces pass/fail, repeatable into CI**. It does not depend on whether the system accessibility tree exposes anything — which is exactly why it's more reliable for Flutter than mobilewright/mobile-mcp (it looks at the tree on the Dart side, not the canvas on the native side).
 
-- **mobilecli / mobile-mcp 都是坐标级**:能力是「列元素(含 label + 像素 rect)」+「点坐标」两步,**没有按 label 直接点的原生命令**。
-- mobilecli 的 `webview query` / mobile-mcp 没有的 `getBy*` —— 那些**只作用于 webview DOM**(CSS selector / JS),**不作用于原生控件,更不作用于 Flutter 的 Semantics 树**。
-- 真正"locator 一步到位"的是 **mobilewright**,但它 **Flutter ⏳ 不支持**(见上)。
+**When it must be it**:
+- Any Flutter UI/integration assertion that needs **regression, repeatability, pass/fail, or CI**.
+- When an element-driven one-off tap has gone through, but you need to freeze it into a long-lived regression case.
 
-**所以在 Flutter 上"按 label 一步点"靠**:`scripts/tap-by-label.sh <deviceId> "<label子串>"`(零依赖 jq):内部 `dump ui` → jq 按 label 取 rect → 算中心 → `io tap`。这是把"列元素 + 点坐标"两步在脚本里粘成一步,补齐 mobilecli 缺的那条命令。
+**Division of labor with element-driven** (both within this skill, complementary):
+- Exploration phase / one-off verification → mobilecli `dump ui`→`io tap` (fast, leaves no assets).
+- Solidification phase / regression → Patrol by Key (a bit slower, leaves a repeatable case).
+- Hence the two share one code contract: interactive/assertable widgets get **both** a `Key` (for Patrol) and `Semantics(label:)` (for element-driven).
+
+> Commands and code templates are in `SKILL.md` "Full self-driving development loop" section, not duplicated here.
 
 ---
 
-## 决策规则表(对着这张挑)
+## ★ Key fact: there is no native "tap by label in one step" command
 
-| 你要做的事 | 挑这把 | 因为 |
+An easy misconception: assuming mobilecli/mobile-mcp can do `getByLabel('X').tap()` in one step like mobilewright. **They can't**:
+
+- **mobilecli / mobile-mcp are both coordinate-level**: the capability is "list elements (with label + pixel rect)" + "tap coordinate" — two steps, **no native command to tap by label directly**.
+- mobilecli's `webview query` / the `getBy*` that mobile-mcp lacks — those **act only on the webview DOM** (CSS selector / JS), **not on native widgets, and certainly not on Flutter's Semantics tree**.
+- The real "one-step locator" is **mobilewright**, but it **⏳ doesn't support Flutter** (see above).
+
+**So "tap by label in one step" on Flutter relies on**: `scripts/tap-by-label.sh <deviceId> "<label-substring>"` (zero-dependency jq): internally `dump ui` → jq picks the rect by label → computes center → `io tap`. This glues the two steps "list elements + tap coordinate" into one inside a script, filling in the command mobilecli lacks.
+
+---
+
+## Decision rule table (pick against this)
+
+| What you want to do | Pick this | Because |
 |---|---|---|
-| 自主跑里**即时交互 / 探索**(点一下看效果、导航、抓崩溃、看前台) | **mobilecli** | 已装二进制,免 MCP/重启,闭环最短;**唯一能给可点坐标的** |
-| **诊断取证**:控件在不在 / Key 拼对没 / 是哪行代码画的 / 布局真实尺寸 / 这步报没报错 | **VM Service** | `flutter run` 已开的通道,一行 curl;**不依赖 Semantics**,widget 树直接带 `Key` 和源码行号 → `vm-service.md` |
-| 想走 **MCP 工具流**(已注册 / 要截图省 token / 与别的 MCP 编排) | **mobile-mcp** | 同引擎换皮;但改配置下次会话才生效、无前台校验/无 fs |
-| **Flutter 的可复跑 UI/集成断言**(回归、CI、要 pass/fail) | **Patrol** | Dart VM 按 Key,Flutter 唯一可靠确定性路径 |
-| **TS 可复跑脚本 / 系统级 / 跨 app / 内嵌 webview**(且目标非 Flutter canvas) | **mobilewright** | Playwright 风 locator + auto-wait + reporter + CI;**Flutter ⏳ 不支持** |
-| **环境体检** | **mobilewright doctor** | 现成跨平台,`--json` 可机读 |
-| **按 label 一步点 Flutter 控件** | **`scripts/tap-by-label.sh`** | mobilecli/mobile-mcp 都无此原生命令;mobilewright Flutter 不支持 |
-| **纯 canvas 盲点**(图表内部等无任何 Semantics) | **adb**(Android)/ **simctl·WDA**(iOS) | 末选;只要有 Semantics 一律走元素驱动 |
+| **Instant interaction / exploration / diagnosis** in a self-driving run (tap-and-see, navigate, grab crashes, check foreground) | **mobilecli** | already-installed binary, no MCP/restart, shortest loop |
+| **Diagnosis & evidence**: does the widget exist / is the Key spelled right / which line painted it / real layout size / did this step error | **VM Service** | the channel `flutter run` already opened, one curl; **no Semantics dependency**, the widget tree carries `Key` and source line numbers → `vm-service.md` |
+| Want to go through the **MCP tool flow** (already registered / want screenshots to save tokens / orchestrate with other MCPs) | **mobile-mcp** | same engine, different skin; but config takes effect next session, no foreground check / no fs |
+| **Repeatable Flutter UI/integration assertions** (regression, CI, want pass/fail) | **Patrol** | Dart VM by Key, Flutter's only reliable deterministic path |
+| **Repeatable TS scripts / system-level / cross-app / embedded webview** (and target is not Flutter canvas) | **mobilewright** | Playwright-style locator + auto-wait + reporter + CI; **Flutter ⏳ not supported** |
+| **Environment health check** | **mobilewright doctor** | ready-made cross-platform, `--json` is machine-readable |
+| **Tap a Flutter widget by label in one step** | **`scripts/tap-by-label.sh`** | mobilecli/mobile-mcp have no such native command; mobilewright doesn't support Flutter |
+| **Pure canvas blind-tap** (inside charts etc. with no Semantics at all) | **adb** (Android) / **simctl·WDA** (iOS) | last resort; as long as there's Semantics, always go element-driven |
 
-> 顺序心法:**能 mobilecli 就别起 MCP,能元素驱动就别盲点,要回归就上 Patrol,Flutter 断言永远不押 mobilewright。**
+> Ordering mantra: **if mobilecli can do it don't spin up MCP, if element-driven works don't blind-tap, if you need regression bring in Patrol, never bet Flutter assertions on mobilewright.**
 >
-> 再加一句(与上面同等重要):**要点用 mobilecli,要证据用 VM Service,要回归用 Patrol**——这三者不是替代关系,是分工。找不到控件、布局不对、疑似报错时先查 VM Service,别一上来就截图肉眼找;而**能离线证明的交互与视觉,连设备都不该上**(见 `offline-test-layer.md` 的 widget test / golden 两层)。
+> And one more, equally important: **to tap use mobilecli, for evidence use VM Service, for regression use Patrol** — the three are a division of labor, not substitutes. When a widget can't be found, the layout is wrong, or you suspect an error, check the VM Service first instead of eyeballing screenshots; and **whatever can be proven offline — interaction and visuals alike — shouldn't reach a device at all** (see the widget test / golden layers in `offline-test-layer.md`).

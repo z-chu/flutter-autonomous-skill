@@ -1,149 +1,149 @@
-# 规模化与无人值守
+# Scaling and Unattended Operation
 
-> 本文承接 keystone(`../SKILL.md`):闭环方法论、环境自举四红线、元素驱动优先、Key+Semantics 双标、验证分层、`--pid-file`+`USR1/USR2`、`kill≠force-stop`、提交规范——都在那里,**这里只讲"把单条闭环放大成多路并行、再放大成无人值守"**。
+> This doc builds on the keystone (`../SKILL.md`): closed-loop methodology, the four red lines of environment self-bootstrapping, element-driven first, the Key+Semantics dual labeling, the four verification layers, `--pid-file`+`USR1/USR2`, `kill≠force-stop`, commit conventions — all there. **Here we only cover "scaling a single loop into multiple parallel ones, then into unattended operation."**
 >
-> 一句话主线:你唯一不可替代的两件事是 **① 把需求翻译成可断言的验收标准**(越练越值钱)和 **② 审结论、把方向**;其余"跑、点、看、改"全挪进 AI 的时间里。规模化 = 同时挪多条 + 在你睡觉时挪。
+> One-line throughline: the only two things that are irreplaceable for you are **① translating requirements into assertable acceptance criteria** (more valuable the more you practice) and **② reviewing conclusions and steering direction**; everything else — "run, tap, look, fix" — is offloaded onto AI's time. Scaling = offloading multiple loops at once + offloading while you sleep.
 >
-> 项目特定值(包名/设备/dart-define/红线)一律从项目根 `CLAUDE.md` 读,**本文一个具体值都不写死**。
+> Project-specific values (package name/device/dart-define/red lines) are always read from the project root `CLAUDE.md`; **this doc hard-codes not a single concrete value**.
 
 ---
 
-## 1. 信任阶梯:先盯一两次,再放飞
+## 1. Trust ladder: watch once or twice first, then let it fly
 
-**别一上来就整晚放飞**——你会不信任它,也接不住它跑偏。盯一两次摸清它的脾气(它怎么展开验收标准、怎么定位失败、第几轮容易钻牛角尖),信任自然建立。四级递进:
+**Don't go straight to all-night autopilot** — you won't trust it, and you won't be able to catch it when it goes off the rails. Watch it once or twice to learn its temperament (how it unfolds acceptance criteria, how it localizes failures, which round it tends to fixate on a dead end), and trust builds naturally. Four escalating levels:
 
-| 级别 | 你做什么 | AI 做什么 | 信号:可以升级了 |
+| Level | What you do | What AI does | Signal: ready to level up |
 |---|---|---|---|
-| **L1 闭环观察者** | `/spec` 展开验收标准 + **人工确认** + **全程盯着看** | 实现 → 跑验证 → 自修复,你在旁边看每一步 | 你看懂了闭环长什么样:它怎么 `dump ui`、怎么读失败、第几轮收敛 |
-| **L2 放手验证** | `/ship` 一路到提交,**只审最终报告** | 实现→双端验证→自修复(≤5 轮)→commit(不 push) | 连续几次报告里的"验收对照表"和你自己跑的结论一致,你开始信它 |
-| **L3 无人值守** | 睡前丢一份任务清单 / `/schedule` 定时跑,**早上收割** | 按清单逐个 `/ship`,卡住就跳过并标记,攒一批报告 | 你的验收标准写得够准(它很少因歧义停下),且护栏到位(见 §4) |
-| **L4 流程经营者** | 把跑顺的母版(项目 `CLAUDE.md` 约定 + `.claude/commands/` + 权限白名单 + hooks)**沉淀成团队模板** | 别人复制即用 | 你从"写得快"变成"设计别人怎么写得快"——这才是杠杆最大的位置 |
+| **L1 Loop observer** | `/spec` to unfold acceptance criteria + **manual confirmation** + **watch the whole way through** | Implement → run verification → self-fix, with you watching every step | You understand what the loop looks like: how it does `dump ui`, how it reads failures, which round it converges |
+| **L2 Hands-off verification** | `/ship` all the way to commit, **review only the final report** | Implement → dual-platform verification → self-fix (≤5 rounds) → commit (no push) | The "acceptance comparison table" in several consecutive reports matches the conclusions you ran yourself; you start trusting it |
+| **L3 Unattended** | Drop a task list before bed / `/schedule` a timed run, **harvest in the morning** | Run `/ship` on each item in the list one by one, skip and flag when stuck, accumulate a batch of reports | Your acceptance criteria are written accurately enough (it rarely stops on ambiguity), and the guardrails are in place (see §4) |
+| **L4 Process operator** | Distill the working master template (the project `CLAUDE.md` conventions + `.claude/commands/` + permission allowlist + hooks) **into a team template** | Others copy and use it as-is | You shift from "writing fast" to "designing how others write fast" — this is the position with the highest leverage |
 
-**升级铁律**:每一级都要先在上一级**稳定复现成功**再往上跳。L1→L2 看的是"报告可信",L2→L3 看的是"验收标准准到它不再频繁问你"。跳级的代价是:你不信任 → 整晚的产出你还得逐行重验,白跑。
+**Iron rule for leveling up**: at each level, **stably reproduce success** at the level below before jumping up. L1→L2 is about "the report is trustworthy," L2→L3 is about "acceptance criteria accurate enough that it no longer asks you frequently." The cost of skipping a level: you don't trust it → you still have to re-verify an entire night's output line by line, a wasted run.
 
-> 学习要点:**先看一遍闭环(L1),再放手(L2),最后才规模化(L3/L4)。** 信任是盯出来的,不是赌出来的。
+> Learning point: **Watch the loop once (L1), then go hands-off (L2), and only then scale (L3/L4).** Trust is earned by watching, not by gambling.
 
 ---
 
-## 2. 并行三姿势 + 怎么选
+## 2. Three parallel postures + how to choose
 
-并行的前提是**任务之间互不依赖、各自能独立验证全绿**。有依赖的先串行做完地基,再并行做上层。
+The prerequisite for parallelism is that **tasks are independent of each other and each can be independently verified all-green**. For dependent tasks, do the foundation serially first, then build the upper layers in parallel.
 
-### 姿势一:多 git worktree + 多终端(最简单直接)
+### Posture one: multiple git worktrees + multiple terminals (simplest and most direct)
 
-每个功能开一个独立 worktree(独立工作树 + 独立分支,互不污染),各开一个 Claude Code 窗口,各跑各的 `/ship`。你像"带多个实习生",每人一个隔离工位。
+Open an independent worktree per feature (independent working tree + independent branch, no cross-contamination), open a Claude Code window for each, and each runs its own `/ship`. You're like "managing multiple interns," each with an isolated workstation.
 
 ```bash
-# 在主仓库根目录执行;路径/分支名按功能起,别写死
+# Run in the main repo root; name paths/branches by feature, don't hard-code
 git worktree add ../app-feat-x -b feat/x
 git worktree add ../app-feat-y -b feat/y
-# 分别进 ../app-feat-x 和 ../app-feat-y 各开 claude,各跑 /ship
+# Enter ../app-feat-x and ../app-feat-y separately, open claude in each, run /ship in each
 ```
 
-- **优点**:隔离最彻底(各自独立的 build 产物、独立的 `flutter run` 宿主),互不抢文件。
-- **设备注意**:多个 `flutter run` 若**共用同一台设备**会互相打架——`--pid-file` 必须**拼项目/分支后缀**避免撞(keystone 已强调),且同设备别同时热重载两套。理想是**一 worktree 一设备/模拟器**;设备不够就错峰跑,或都跑模拟器(快、可多开)。
-- **收尾**:每个 worktree 跑完各自走 keystone 的收尾两步(停宿主 + `apps terminate`)并回查;别留下一堆共存 App 在设备上串台。worktree 用完 `git worktree remove <path>` 清掉。
+- **Pros**: most thorough isolation (each with independent build artifacts, independent `flutter run` host), no fighting over files.
+- **Device note**: multiple `flutter run` instances **sharing the same device** will fight each other — `--pid-file` must **append a project/branch suffix** to avoid collision (the keystone already stresses this), and don't hot reload two sets on the same device at once. Ideally **one worktree per device/simulator**; if you don't have enough devices, stagger the runs, or run all on simulators (fast, can open multiple).
+- **Teardown**: when each worktree finishes, run the keystone's two teardown steps (stop host + `apps terminate`) and verify; don't leave a pile of co-existing Apps cross-talking on the device. When done with a worktree, clean it up with `git worktree remove <path>`.
 
-### 姿势二:单会话子代理在隔离 worktree 并行(一句话调度)
+### Posture two: single-session subagents in parallel in isolated worktrees (one-sentence scheduling)
 
-直接跟 AI 说一句,它派多个子代理在**各自隔离的 worktree** 里同时做多个独立功能,每个子代理自己跑到双端验证全绿再各自提交,最后主会话汇总多份报告。适合"我懒得开多个窗口、但想几件事一起推"。
+Just tell the AI in one sentence, and it dispatches multiple subagents to work on multiple independent features simultaneously **in their own isolated worktrees**, each subagent running to dual-platform verification all-green and committing on its own, with the main session finally aggregating the multiple reports. Suited for "I can't be bothered to open multiple windows, but I want to push several things at once."
 
-> 用相互隔离的 worktree,并行实现下面 N 个互不依赖的功能,每个都自验证到双端全绿(≤5 轮自修复)再各自 commit(不 push),最后汇总各自的验收对照表+改动+截图+commit hash:
+> Using mutually isolated worktrees, implement the following N independent features in parallel, each self-verifying to dual-platform all-green (≤5 rounds of self-fix) before committing on its own (no push), finally aggregating each one's acceptance comparison table + changes + screenshots + commit hash:
 > 1) ... 2) ... 3) ...
 
-- **和姿势一的差别**:你只下一道指令,调度交给主会话;隔离仍靠 worktree。
-- **适用**:2~4 个**真正独立**的功能。彼此一旦有共享文件/依赖,子代理会撞在一起,反而更慢——这种情况退回串行或拆小。
+- **Difference from posture one**: you issue only one instruction, scheduling is handed to the main session; isolation still relies on worktrees.
+- **Applicable**: 2~4 **truly independent** features. Once they share files/dependencies, subagents collide with each other and it ends up slower — in that case fall back to serial or break into smaller pieces.
 
-### 姿势三:Workflow 编排(进阶,重、烧 token,需显式开启)
+### Posture three: Workflow orchestration (advanced, heavy, token-hungry, requires explicit opt-in)
 
-需要"**扇出大量代理 + 对抗式验证 + 综合**"的规模化场景——一次性审计/迁移整个模块、跨多个模块的大改造——才上。它会扇出多个代理分工、用对抗式验证交叉核对、再综合成结论。
+Only bring this out for scaling scenarios that need "**fan out a large number of agents + adversarial verification + synthesis**" — one-off auditing/migrating an entire module, large refactors spanning multiple modules. It fans out multiple agents to divide the work, cross-checks with adversarial verification, then synthesizes into a conclusion.
 
-- **代价**:重、显著烧 token、协调开销大。**不会默认触发**:你得**明确说"用 workflow"**或开 ultracode,我才会上。
-- **别滥用**:日常 1~3 个功能用姿势一/二就够,杀鸡别用牛刀。
+- **Cost**: heavy, significantly token-hungry, large coordination overhead. **It won't trigger by default**: you have to **explicitly say "use workflow"** or turn on ultracode for me to bring it out.
+- **Don't abuse it**: for daily 1~3 features, posture one/two is enough; don't use a sledgehammer to crack a nut.
 
-### 怎么选(一句话)
+### How to choose (one line)
 
-| 任务规模 | 选哪个 |
+| Task scale | Which to pick |
 |---|---|
-| **1 个功能** | 直接 `/ship`,不并行 |
-| **2~4 个互不依赖的功能** | 姿势二(子代理 + 隔离 worktree);想要更彻底隔离/各自盯 → 姿势一 |
-| **跨模块大改造 / 整模块审计·迁移** | 姿势三(显式开 workflow) |
+| **1 feature** | Just `/ship`, no parallelism |
+| **2~4 mutually independent features** | Posture two (subagents + isolated worktrees); want more thorough isolation / to watch each → posture one |
+| **Cross-module large refactor / whole-module audit·migration** | Posture three (explicitly turn on workflow) |
 
 ---
 
-## 3. 无人值守工具箱
+## 3. Unattended toolbox
 
-把"重复触发、盯进度、补白名单"也交出去,L3 才真正无人。
+Hand off "repeated triggering, watching progress, topping up the allowlist" too — only then is L3 truly unattended.
 
-| 工具 | 干什么 | 怎么用 / 注意 |
+| Tool | What it does | How to use / notes |
 |---|---|---|
-| **`/schedule`** | 定时(cron)跑某条流水线——每晚定点自动跑一遍清单 | 设好后到点自动起;配合 §5 的"整晚任务清单"模板。一次性"今晚 3 点跑一次"也行 |
-| **`/loop`** | 按间隔轮询——盯 CI、盯某状态直到达成条件 | 如"每 5 分钟查一次 CI,绿了就通知";**一次性任务别用 loop** |
-| **`/fewer-permission-prompts`** | 扫历史操作,自动把高频只读命令补进项目 `.claude/settings.json` 白名单 | 跑久了嫌弹窗多就来一发,告别 flutter/dart/patrol/git 反复确认 |
-| **`Shift+Tab` → accept-edits** | 切到"自动接受文件改动"模式 | 整晚无人值守时减少打断;**仅在你信任该任务范围时切**,别全局长开 |
-| **`--dangerously-skip-permissions`** | 跳过**所有**确认 | ⚠️ **仅隔离环境用**:干净容器 / 一次性 worktree + **测试数据**。**绝不**在含密钥、能联网写生产的主工程裸跑(见 §4) |
+| **`/schedule`** | Run a pipeline on a schedule (cron) — auto-run the list once at a set time every night | Set it once, it fires automatically at the time; pair with the "all-night task list" template in §5. One-off "run once at 3 AM tonight" also works |
+| **`/loop`** | Poll on an interval — watch CI, watch some state until a condition is met | E.g. "check CI every 5 minutes, notify when green"; **don't use loop for one-off tasks** |
+| **`/fewer-permission-prompts`** | Scan operation history, automatically top up high-frequency read-only commands into the project `.claude/settings.json` allowlist | Run this when you're tired of the popups after a long run; say goodbye to repeated flutter/dart/patrol/git confirmations |
+| **`Shift+Tab` → accept-edits** | Switch to "auto-accept file changes" mode | Reduces interruptions during all-night unattended runs; **only switch when you trust the task's scope**, don't leave it on globally for long |
+| **`--dangerously-skip-permissions`** | Skip **all** confirmations | ⚠️ **Use only in isolated environments**: clean container / one-off worktree + **test data**. **Never** run bare on the main project that contains keys or can write to production over the network (see §4) |
 
-> 顺序建议:先靠**白名单 + hooks**(format/analyze 自检,见 keystone 与 templates)把日常弹窗降到接近零,再考虑 accept-edits;`--dangerously-skip-permissions` 是最后手段,且必须配隔离环境。
-
----
-
-## 4. 安全护栏:放手但别翻车
-
-无人值守放大的是**产出**,也放大**翻车**。四条护栏一条都不能省:
-
-1. **只 commit,不 push**(默认)。整晚自动攒提交,**早上你 review 后再推**。自动合并/自动 push 要谨慎——没人看的合并最容易把脏东西带上去。这条也是 keystone 提交规范的延伸。
-2. **整晚跑用 mock / 测试账号,别连真实后端写生产**。验证环境与生产数据**物理隔离**。涉及花真钱的操作 / 密钥凭证 / 不可逆破坏 = keystone 红线（含项目 CLAUDE.md 特有红线）,**默认禁止,仅你事先明确授权(写明范围)才可做**;无人值守遇到未授权的红线操作直接跳过并标注「需授权」,不等人,也不豁免。
-3. **始终要证据,没证据不算完成**。报告按 keystone 的**完成门槛**五项出齐,缺一项不算完成;卡在第 5 轮的失败也要如实标记,别藏。规模化只是把它乘以 N——N 份报告,每份都要过同一道门槛。
-4. **验证也进 CI(双保险)**。把 Patrol 用例同时放 CI 跑——本地全绿 + CI 全绿,无人值守的产出才经得起第二只眼睛。`--dangerously-skip-permissions` 配隔离环境的前提(测试数据、干净 worktree)也属此条:**隔离是放手的入场券**。
-
-> 一句话:**没有证据的"已完成"不算完成;没有隔离的"放手"不叫放手,叫赌。**
+> Suggested order: first use the **allowlist + hooks** (format/analyze self-check, see keystone and templates) to drive daily popups close to zero, then consider accept-edits; `--dangerously-skip-permissions` is the last resort, and must be paired with an isolated environment.
 
 ---
 
-## 5. 提示词模板(填空即用,全占位无项目值)
+## 4. Safety guardrails: let go but don't crash
 
-以下模板里的 `<...>` 一律替换成你的实际需求;包名/设备/红线由项目 `CLAUDE.md` 提供,模板里不写。
+Unattended operation amplifies **output**, and also amplifies **crashes**. None of the four guardrails can be skipped:
+
+1. **Commit only, don't push** (default). Auto-accumulate commits all night, **push only after you review in the morning**. Auto-merge/auto-push needs caution — a merge no one looks at most easily drags dirty things in. This is also an extension of the keystone's commit conventions.
+2. **Run all-night with mock / test accounts, don't connect to real backends and write to production**. **Physically isolate** the verification environment from production data. Anything involving real-money operations / secrets & credentials / irreversible destruction = the keystone's red lines (plus project-specific red lines from the project CLAUDE.md): **denied by default, allowed only with your explicit upfront authorization (scope stated)**; an unattended run that hits an unauthorized red-line operation skips it and marks "authorization needed" — it never waits, and gets no exemption.
+3. **Always demand evidence; without evidence it doesn't count as done**. Reports carry all five items of the keystone's **completion bar**; missing any one means not done, and a failure stuck at round 5 must be flagged honestly, not hidden. Scaling just multiplies it by N — N reports, each clearing the same bar.
+4. **Verification also goes into CI (double insurance)**. Put Patrol cases into CI to run as well — local all-green + CI all-green, and only then does unattended output withstand a second pair of eyes. The prerequisite for pairing `--dangerously-skip-permissions` with an isolated environment (test data, clean worktree) also belongs to this guardrail: **isolation is the entry ticket for letting go**.
+
+> One line: **a "done" without evidence doesn't count as done; a "letting go" without isolation isn't letting go, it's gambling.**
+
+---
+
+## 5. Prompt templates (fill in the blanks, all placeholders, no project values)
+
+Replace every `<...>` in the templates below with your actual requirements; package name/device/red lines are provided by the project `CLAUDE.md`, not written in the templates.
 
 ```text
-# 新功能(全自动)
-/ship <功能>。完成的标准:<操作> 后应 <预期>;边界:<异常输入/网络失败/空数据 时应 ...>。
-遵守 CLAUDE.md 约定(可交互/可断言控件加 Key+Semantics、配套 Patrol 用例),双端验证全绿再提交。
+# New feature (fully automatic)
+/ship <feature>. Done criteria: after <operation> it should <expected>; edge cases: <on abnormal input/network failure/empty data it should ...>.
+Follow CLAUDE.md conventions (add Key+Semantics to interactable/assertable controls, accompanying Patrol cases), dual-platform verify all-green before committing.
 ```
 
 ```text
-# 改 Bug(带复现 + 回归用例)
-/ship 修复:<现象>。复现步骤:<1> → <2> → <3>,预期 <X> 实际 <Y>。
-先定位根因,修实现(不是改测试降标准);修复后写一条 Patrol 回归用例按 Key 锁住它,双端验证通过再提交。
+# Fix a bug (with repro + regression case)
+/ship fix: <symptom>. Repro steps: <1> → <2> → <3>, expected <X> actual <Y>.
+Localize the root cause first, fix the implementation (not modify tests to lower the bar); after fixing write one Patrol regression case to lock it down by Key, dual-platform verify passing before committing.
 ```
 
 ```text
-# 只验证现有改动(不写新功能)
-/verify 重点验证 <功能/页面>,iOS + Android 都要过。
-失败按"逻辑 bug 改实现"处理,≤5 轮自修复;出验收对照表 + 截图 + 仍存疑的点。
+# Verify existing changes only (no new features)
+/verify focus on verifying <feature/page>, both iOS + Android must pass.
+Treat failures as "logic bug, fix the implementation," ≤5 rounds of self-fix; produce an acceptance comparison table + screenshots + points still in doubt.
 ```
 
 ```text
-# 视觉把关(元素驱动 + 截图)
-跑起来,用 dump ui 导航到 <页面>(按 label 点,别盲点),截图给我看:
-<布局有没有错位 / 深色模式下文字对比度够不够 / <某元素> 是否在预期位置>。
-有 RenderFlex overflow 之类的也一并报。
+# Visual gatekeeping (element-driven + screenshots)
+Get it running, use dump ui to navigate to <page> (tap by label, no blind-tap), screenshot it for me to look at:
+<is the layout misaligned / is the text contrast sufficient in dark mode / is <some element> in the expected position>.
+Also report any RenderFlex overflow and the like.
 ```
 
 ```text
-# 并行交付(隔离 worktree)
-用相互隔离的 worktree,并行做下面这几个互不依赖的功能,各自双端验证到全绿(≤5 轮自修复)再各自提交(不 push),最后汇总每个的验收对照+改动+截图+commit hash:
-1) <功能 A> 2) <功能 B> 3) <功能 C>
+# Parallel delivery (isolated worktrees)
+Using mutually isolated worktrees, do the following several mutually independent features in parallel, each dual-platform verifying to all-green (≤5 rounds of self-fix) before committing on its own (no push), finally aggregating each one's acceptance comparison + changes + screenshots + commit hash:
+1) <feature A> 2) <feature B> 3) <feature C>
 ```
 
 ```text
-# 整晚任务清单(无人值守)
-今晚按顺序自主完成下面任务,每个都 /ship 级(实现 → 双端验证 → ≤5 轮自修复 → 提交,不 push)。
-用 mock/测试数据,绝不连生产、不碰花真钱的操作/密钥凭证/不可逆操作。
-任一任务卡满 5 轮自修复或遇需求歧义,就跳过并在报告里标记原因,继续下一个。
-早上给我一份汇总:每个任务的验收对照表 + 改动文件 + 关键截图 + commit hash + 遗留/卡住项。
-- [ ] <任务 1>
-- [ ] <任务 2>
-- [ ] <任务 3>
+# All-night task list (unattended)
+Tonight, autonomously complete the following tasks in order, each at /ship level (implement → dual-platform verify → ≤5 rounds of self-fix → commit, no push).
+Use mock/test data, never connect to production, don't touch real-money operations/secrets/irreversible operations.
+If any task maxes out 5 rounds of self-fix or hits requirement ambiguity, skip it and flag the reason in the report, continue to the next.
+In the morning give me an aggregate: each task's acceptance comparison table + changed files + key screenshots + commit hash + leftover/stuck items.
+- [ ] <task 1>
+- [ ] <task 2>
+- [ ] <task 3>
 ```
 
-> 模板回报最高的一行永远是"**完成的标准**"那句——写清"做完长什么样 + 异常下怎样",省你一整晚来回。这就是 §1 里那件"唯一不可替代"的事。
+> The highest-return line in a template is always the "done criteria" sentence — write clearly "what done looks like + how under abnormal conditions," and it saves you an entire night of back-and-forth. This is that "only irreplaceable" thing from §1.

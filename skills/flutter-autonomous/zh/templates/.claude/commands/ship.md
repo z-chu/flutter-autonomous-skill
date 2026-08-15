@@ -1,0 +1,90 @@
+---
+description: 全自主交付单个功能：定标准 → 实现 → 分层验证（先离线后设备）→ 修复 → 截图 →（按用户提交策略处理提交）
+allowed-tools: Bash, Read, Edit, Write, Grep, Glob
+argument-hint: [一句话需求，包含「完成的样子」]
+---
+
+需求：$ARGUMENTS
+
+**全程自主执行。** **绿区**的事自己做完接着干；**红线**操作（花真钱 / 密钥凭证 / 不可逆破坏，含项目 CLAUDE.md 的特有红线）**默认禁止**——仅用户已事先明确授权（本次指令，或项目 CLAUDE.md 里写明的授权例外）才可做，未授权则该项跳过并在报告标注「需授权」；只有设备物理掉线（自救一次仍败）或需求有无法自决的歧义时才停下。规则、定位优先级、Key+Semantics 双标、热重载档位、收尾两步全部对齐 `flutter-autonomous` skill，本命令只走流程。**提交不是默认动作**——按用户提交策略处理（见第 5 步）。
+
+---
+
+## 第 1 步：定验收标准（自己确认，不等人）
+
+展开 3~8 条可断言验收条件：每条「操作（找 `Key`/label → 做什么）→ 预期」；列出要新增的 `Key`+`Semantics` 控件清单；列出要改的文件；**逐条标清落哪层验证**：纯逻辑 → 离线 fixture；交互/跳转 → widget test 织回归网；视觉/深色/大字号 → golden 矩阵；连接/状态机 → 日志取证；**真机渲染观感·系统集成·真实数据 → 设备层**。
+
+> **只要这次动了 UI，验收条件里必须至少有一条是「上设备真跑 + 截图核验」**——离线层是回归网和省时手段，不能替代亲眼看一次真机效果。
+
+需求本身有无法自决的歧义（不知跳哪页、UI 不明确、平台不明确）→ **停下说明歧义点，等我确认**。
+
+---
+
+## 第 2 步：实现
+
+- 写 Dart 实现，遵守项目 `CLAUDE.md` 全部约定。
+- 关键控件加 `key: const Key('xxx')`（Patrol 用）+ `Semantics(label:)`（元素驱动用）；自定义手势控件显式包 `Semantics(label+button:true)`。
+- 同步配套测试，**按第 1 步标好的层写**：纯逻辑 → `test/.../xxx_test.dart`（fixture/mock）；交互/跳转 → `test/.../xxx_widget_test.dart`（`testWidgets`，无设备）；视觉 → `test/.../xxx_golden_test.dart` + `test/goldens/`（主题×字号矩阵）；无障碍契约 → 一条 `meetsGuideline` 自检；**只有真机才能验的**才写 `integration_test/<feature>_test.dart`（Patrol，按 `Key`）。
+- 改代码靠 `--pid-file` + `USR1`(方法体热重载) / `USR2`(初始化·main·路由热重启)，别动不动冷启。
+
+---
+
+## 第 3 步：分层验证（顺序固定，≤5 轮自修复）
+
+每轮：
+
+```bash
+flutter analyze                       # ① 零警告才继续
+flutter test                          # ② 离线层：纯逻辑 + widget test + golden/a11y 一把跑完（无 test/ 跳过）
+mobilecli devices                     # ③ 设备发现（不写死 id；iOS 默认模拟器，见 references/ios.md）
+mobilecli apps foreground --device <id>   # 进设备前确认前台=目标包，防串台
+patrol test -t integration_test/<feature>_test.dart --device <deviceId>   # ④ 设备层：Patrol 按 Key
+```
+
+- 离线层（②）失败 = 逻辑/行为/视觉契约 bug，按下方分类 C 修实现、**不降断言**，离线全绿才上设备。
+- golden 失败先读 `test/failures/*_isolatedDiff.png` 判断变化是否预期，**是预期才 `--update-goldens`**。
+- 设备都空：环境自举自救一次仍空 = 离线，停止报告。
+- **失败分类**（断言失败=改实现不改测试）：
+  - A 编译失败 → 读完整 analyze 输出修，回轮首
+  - B `found 0 widgets` → **先用 VM Service 拉 widget 树核对 Key**（`ext.flutter.inspector.getRootWidgetSummaryTree`，带源码行号，见 skill `references/vm-service.md` §3.1）→ 再查条件渲染 / 需否 `.scrollTo()`；`dump ui` 列不出=回代码补 `Semantics` + 补一条 `meetsGuideline` 自检
+  - C 断言失败 → 逻辑 bug，修实现，不降标准
+  - D crash/超时 → `mobilecli device crashes list/get` 读堆栈首个 `package:<your_app>/` 行
+  - E 安装/断连 → `mobilecli devices` 重试一次仍败则停
+- **第 5 轮仍未通过**：停止本功能，输出卡住报告（失败现象 / 错误原文 / 已试方向 / 根因推测）。
+
+---
+
+## 第 4 步：截图核验
+
+`mobilecli screenshot --device <id> -o <out>` → Read 自检布局/截断/颜色/空态/Loading。视觉问题改代码即可，不必重跑 Patrol（除非视觉修复动了功能逻辑）。
+
+---
+
+## 第 5 步：收尾 +（按提交策略）处理提交
+
+```bash
+# 收尾两步并回查（kill flutter run ≠ 关 App）——这步永远要做
+kill "$(cat <PID_FILE>)" 2>/dev/null
+mobilecli apps terminate --device <id> <packageName>
+mobilecli apps foreground --device <id>            # 回查确认已关
+```
+
+**提交不是本流程默认动作**：按用户的提交策略处理（开工前问清 / 见项目 `CLAUDE.md` 里写的提交策略）——增量提 / 干完再统一提 / 不提（人工自己提）/ 其它。**不默认自动提交。** 若策略要提交，规范以用户全局 / 项目 `CLAUDE.md` 为准（精确 `git add` 不用 `git add .`、约定式 message、含反引号/`$`/`!` 用单引号或 `-F`、绝不加 AI 署名、是否 push 看策略），提交后 `git log -1 --stat` 回查 HEAD 确实动了。
+
+---
+
+## 第 6 步：报告
+
+```
+## ✅ 功能：<功能名>
+
+验收条件：
+- [x] 条件1
+- [x] 条件2
+
+改动：lib/xxx.dart, test/xxx_test.dart, test/xxx_widget_test.dart, test/goldens/*, integration_test/xxx_test.dart
+验证：analyze ✅ / flutter test ✅(N，含 widget/golden/a11y) / patrol ✅(N) / 截图 ✅
+Commit：（若按策略提交了）<hash> feat: xxx（已回查 HEAD）/ 否则注明「按策略不提交」
+截图：（关键截图）
+遗留：无 / <具体>
+```

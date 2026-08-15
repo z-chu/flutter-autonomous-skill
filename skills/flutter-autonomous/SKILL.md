@@ -5,356 +5,356 @@ compatibility: Requires Flutter SDK; Android via adb (mac/Linux); iOS via Xcode/
 metadata:
   author: z-chu
   version: "1.1.0"
-description: Flutter 真机/模拟器自主运行与 UI 验证(iOS + Android 对等)。用于:把 App 跑到设备/模拟器上看效果、模拟点击/输入/滑动、截图视觉核验、抓日志定位、E2E/集成回归(Patrol 按 Key),或自主跑「实现→上设备验证→修复→提交」闭环。**要 App 真跑起来看 UI 才用它;纯写单测/纯逻辑测试不用本 skill**(直接 flutter test 即可)。Autonomous Flutter on-device/simulator UI verification: tap/screenshot/log evidence, Patrol E2E regression. Not for writing plain unit tests.
+description: 'Autonomous Flutter on-device/simulator run & UI verification (iOS + Android parity). Use for: running the app on a device/simulator to see how it looks, simulated taps/typing/swipes, screenshot visual verification, log capture for diagnosis, E2E/integration regression (Patrol by Key), or self-driving the implement→verify-on-device→fix→commit loop. **Only use it when the app must actually run so you can look at the UI; do NOT use it for writing plain unit tests / pure-logic tests** (just run flutter test). Flutter 真机/模拟器自主运行与 UI 验证:上设备看效果、模拟点击/输入/滑动、截图核验、抓日志定位、Patrol E2E 回归。纯单测/纯逻辑测试不用本 skill。'
 ---
 
-# Flutter 自主开发与真机/模拟器测试
+# Autonomous Flutter Development & On-Device/Simulator Testing
 
-你进入「Flutter 自主开发模式」:无人监督下跑完 需求 → 实现 → 测试 → 修复 → 提交 的闭环,直到任务清单做完或达重试上限。方法论在本文与 `references/`,**项目特定值一律不写死**:仓库里推得出来的(包名、两端 id、入口)**自己探**,设备**现取**;只有人知道的(日志锚点、工具链硬要求、共存 App、业务红线、提交策略)从项目根 `CLAUDE.md` 读,**没有也照跑**——按 §1 该问的问一句、该保守的保守。iOS 与 Android 对等——交互底座统一 `mobilecli`,平台差异封装在 `references/{ios,android}.md`。
+You are entering "autonomous Flutter development mode": run the requirements → implementation → testing → fixing → committing loop end-to-end unsupervised, until the task list is done or the retry cap is hit. The methodology lives in this doc and `references/`; **never hardcode a project-specific value**: whatever the repo can tell you (package name, both platform ids, entry point) you **detect yourself**, and the device you **take live**. Only what a human alone knows (log anchors, hard toolchain requirements, co-existing apps, business red lines, commit policy) is read from the project-root `CLAUDE.md` — and **the run proceeds without one**, asking where §1 says to ask and staying conservative otherwise. iOS and Android are at parity — the interaction base is unified under `mobilecli`, and platform differences are encapsulated in `references/{ios,android}.md`.
 
 ---
 
-## 0. 这个 skill 是干什么的(以及什么时候别用它)
+## 0. What this skill is for (and when NOT to use it)
 
-**它的存在意义只有一个:把 App 真跑到设备/模拟器上,自己点、自己看、自己判断 UI 到底对不对。** 这是单测覆盖不了、也永远替代不了的那部分——渲染观感、真机交互、系统集成、真实数据下的表现。没有这套方法,AI 面对"看看这个页面对不对"只会退化成盲点坐标的 adb,又慢又瞎。
+**It exists for exactly one reason: to get the app actually running on a device/simulator so you can tap it yourself, look at it yourself, and judge for yourself whether the UI is right.** That is the part unit tests cannot cover and never will — rendering, real-device interaction, system integration, behavior under real data. Without this method, an AI facing "check whether this page looks right" degrades into blind-coordinate adb: slow and blind.
 
-| 任务 | 用本 skill? |
+| Task | Use this skill? |
 |---|---|
-| 「把 App 跑起来看看 X 页面/这个改动效果」 | ✅ **正是它** |
-| 「点一下 X 看看会不会崩/跳对没」「这个布局在真机上是不是错位」 | ✅ |
-| 「给这个功能补 E2E 回归」「实现 X 并自己验到全绿再提交」 | ✅ |
-| 「深色模式/大字号下截图看看」「抓日志定位这个连接问题」 | ✅ |
-| **「给这个解析器/工具函数写个单测」「这段纯逻辑测一下」** | ❌ **不用**——直接写 `test/` 跑 `flutter test`,**杀鸡不用牛刀** |
-| **「跑一下现有测试看过没过」** | ❌ 不用——直接 `flutter test` |
+| "Run the app and show me page X / the effect of this change" | ✅ **exactly this** |
+| "Tap X and see if it crashes / navigates right", "is this layout misaligned on a real device" | ✅ |
+| "Add E2E regression for this feature", "implement X and verify it all-green before committing" | ✅ |
+| "Screenshot it in dark mode / at large font scale", "grep the logs to pin down this connection issue" | ✅ |
+| **"Write a unit test for this parser/util function", "test this piece of pure logic"** | ❌ **No** — just write `test/` and run `flutter test`; **don't use a sledgehammer to crack a nut** |
+| **"Run the existing tests and see if they pass"** | ❌ No — just `flutter test` |
 
-> **判据一句话**:任务里如果**不需要 App 真的跑起来、不需要看 UI**,就不该动用本 skill。本文后面所有关于离线测试层的内容,都是**已经在设备闭环里**时用来省设备时间的前置过滤(见 §验证分层),**不是**把本 skill 当单测工具的理由。
+> **The one-line criterion**: if the task **does not require the app to actually run and does not require looking at the UI**, this skill should not be invoked. Everything below about the offline test layer is a pre-filter used **when you are already inside the device loop** to save device time (see §Verification layering) — it is **not** a reason to treat this skill as a unit-test tool.
 
 ---
 
-## 1. 开工先收集上下文(项目无关化的地基)
+## 1. Gather context before you start (the project-agnostic foundation)
 
-动手前先把"这是哪个项目"问清楚,**自动探测、别问人、别写死**:
+Before doing anything, pin down "which project is this" — **auto-detect, don't ask, don't hardcode**:
 
-- **applicationId**(Android)← `android/app/build.gradle(.kts)` 的 `applicationId`
-- **bundleId**(iOS)← `ios/Runner.xcodeproj/project.pbxproj` 的 `PRODUCT_BUNDLE_IDENTIFIER`(或 Flutter `pubspec.yaml` 的 `patrol:` 段)
-- **入口 / dart-defines** ← `.vscode/launch.json` 的 debug 配置 或 项目 `CLAUDE.md`
-- **设备** ← §2 自举后运行时 `mobilecli devices` **现取**;设备 id 只活在这次运行里
-- **日志锚点 / 工具链约束(JDK/Xcode)/ 同设备共存 App / 业务红线** ← 项目 `CLAUDE.md`
-- **提交策略(开工前问一句)** ← **提交不是本 skill 的职责**:要不要 commit、怎么 commit(干一点提交一点 / 干完再统一提 / 不提交 / 其它要求)**由用户定**。项目 `CLAUDE.md` 写了提交策略、或本次指令已说明,就照做;**没说就先问一句再开跑**,问清后整个过程按它执行。提交规范(精确 `git add`、message 格式、是否 push、署名)以用户**全局 / 项目 `CLAUDE.md`** 为准,别在这里替用户定。
+- **applicationId** (Android) ← `applicationId` in `android/app/build.gradle(.kts)`
+- **bundleId** (iOS) ← `PRODUCT_BUNDLE_IDENTIFIER` in `ios/Runner.xcodeproj/project.pbxproj` (or the `patrol:` block in `pubspec.yaml`)
+- **Entry point / dart-defines** ← debug configs in `.vscode/launch.json` or the project `CLAUDE.md`
+- **Device** ← taken **live** at runtime from `mobilecli devices` after the §2 bootstrap; a device id lives only inside this run
+- **Log anchors / toolchain constraints (JDK/Xcode) / co-existing apps on the same device / business red lines** ← project `CLAUDE.md`
+- **Commit policy (ask once before starting)** ← **committing is not this skill's call**: whether to commit and how (commit as you go / one commit at the end / don't commit / something else) **is the user's decision**. If the project `CLAUDE.md` states a commit policy, or this session's instruction does, follow it; **if not, ask once before you start running**, then follow that answer throughout. Commit conventions (precise `git add`, message format, whether to push, trailers) follow the user's **global / project `CLAUDE.md`** — don't decide them here on the user's behalf.
 
-**探一次就够,别每步重探**:这些值在一个项目里是稳定的,本次会话探到就**记住复用**——同一次运行里反复 grep `build.gradle` 是纯浪费。运行环境若有跨会话记忆,把**稳定事实**存进去下次直接用:包名与两端 id、入口与 dart-defines、这个项目实际发几端、Patrol 用例放哪、冷启构建大概多久。
+**Detect once, don't re-detect at every step**: these values are stable within a project, so once you've detected them, **remember and reuse them for this session** — grepping `build.gradle` over and over inside one run is pure waste. If your environment has cross-session memory, store the **stable facts** there and use them directly next time: the package name and both platform ids, the entry point and dart-defines, how many platforms this project actually ships, where the Patrol tests live, roughly how long a cold build takes.
 
-**但有三类东西记了就是错**——它们是「此刻」的事实,不是「这个项目」的事实,记下来只会让你带着过期结论往下跑:
+**But three kinds of thing are wrong to remember** — they're facts about *this moment*, not about *this project*, and caching them just means carrying a stale conclusion forward:
 
-| 绝不缓存 | 因为 |
+| Never cache | Why |
 |---|---|
-| 设备 id、VM Service 端口/URI | 每次运行都变(§1;`references/vm-service.md` §5),**必须现取** |
-| 登录态 / 钱包 / 种子数据等前置状态 | 上次进去了不代表这次还进得去。**记「怎么进去」(哪条 deeplink、debug 出口叫什么、测试账号从哪取),别记「已经进去了」** |
-| 任何凭证本身 | 红线③,只记去哪儿取,不记值 |
+| Device id, VM Service port/URI | They change on every run (§1; `references/vm-service.md` §5) — **take them live** |
+| Login state / wallet / seed data and other prerequisites | Getting in last time doesn't mean you can get in now. **Remember the route in** (which deeplink, what the debug hook is called, where the test account is fetched from), **not "I'm already in"** |
+| Any credential itself | Red line ③ — remember where to fetch it, never the value |
 
 ---
 
-## 2. 环境自举:缺工具/依赖就自己装好,别停下要人工
+## 2. Environment bootstrap: if a tool/dependency is missing, install it yourself — don't stop for a human
 
-上下文清楚后立刻补齐工具——**绿区(见下)的事自己做完接着干,绝不停下要人工**。
-(教训:mobile-mcp 没注册 → 退回最低效的盲点 adb → 撞红线被拦 → 停下要人工。本该自检时就装好。)
+Once the context is clear, fill in the tooling immediately — **anything in the green zone (below), do it yourself and keep going; never stop to ask for a human**.
+(Lesson learned: mobile-mcp wasn't registered → fell back to the least efficient blind-coordinate adb → hit a red line and got blocked → stopped for a human. It should have been installed during the self-check.)
 
-一把梭:`bash scripts/bootstrap.sh`(跨平台 mac/Linux、Android+iOS,幂等可重入:每项 **检测→缺则装→回查→已装跳过**)。手动逐项:
+One shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, idempotent and re-entrant: each item is **detect → install if missing → re-check → skip if already present**). Item by item:
 
-| 检查 | 命令 | 缺了怎么办(自己做) |
+| Check | Command | If missing (do it yourself) |
 |---|---|---|
-| 设备在线 | `mobilecli devices`(空再 `adb devices` / `xcrun simctl list devices booted`) | 都空:Android `adb kill-server && adb start-server` 自救一次;iOS 模拟器 `xcrun simctl boot <udid>`;仍空=**物理掉线/没起,才停** |
-| **mobilecli**(交互底座) | `mobilecli --version` | 缺 → `npm i -g mobilecli@latest`;**npm 装不上就换渠道**(它是 Go 二进制,GitHub Releases 有现成产物,见 `references/restricted-network.md`)。已装即用,**无需 MCP/重启** |
-| **mobile-mcp**(MCP 版,可选) | `claude mcp list \| grep -i mobile` | 缺 → `claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest`(**改 MCP 配置=下次会话才连**;本会话先用 mobilecli 顶,别因此退回盲点) |
-| **patrol_cli** | `patrol --version` | 缺 → `dart pub global activate patrol_cli`;装了报 not found → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
-| 项目 Patrol 配置 | pubspec 有 `patrol` dev_dep + `patrol:` 段 + `integration_test/` | 缺 → `flutter pub add patrol --dev` + 补 `patrol:` 段 + Android `androidTest` 脚手架。项目级一次性投入,**装好继续** |
-| node(npx 用) | `node -v`(需 v22+) | 缺 → fnm/nvm 装 |
-| **iOS 专属**(仅 mac) | 见 `references/ios.md` | Xcode CLT、模拟器、真机走 WDA+provisioning(真机装 agent 直接用 app 自身 `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision`);Linux 无 iOS 工具链,自动只跑 Android |
+| Device online | `mobilecli devices` (if empty, then `adb devices` / `xcrun simctl list devices booted`) | All empty: Android `adb kill-server && adb start-server` — one self-recovery attempt; iOS simulator `xcrun simctl boot <udid>`; still empty = **physically disconnected/not started, only then stop** |
+| **mobilecli** (interaction base) | `mobilecli --version` | Missing → `npm i -g mobilecli@latest`; **if npm can't install it, switch channels** (it's a Go binary, prebuilt assets exist on GitHub Releases — see `references/restricted-network.md`). Usable the moment it's installed, **no MCP/restart needed** |
+| **mobile-mcp** (MCP flavor, optional) | `claude mcp list \| grep -i mobile` | Missing → `claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest` (**changing MCP config = only connects next session**; use mobilecli for this session, don't fall back to blind coordinates because of it) |
+| **patrol_cli** | `patrol --version` | Missing → `dart pub global activate patrol_cli`; installed but "not found" → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
+| Project Patrol config | pubspec has the `patrol` dev_dep + a `patrol:` block + `integration_test/` | Missing → `flutter pub add patrol --dev` + add the `patrol:` block + Android `androidTest` scaffolding. A one-time project-level investment — **set it up and keep going** |
+| node (for npx) | `node -v` (needs v22+) | Missing → install via fnm/nvm |
+| **iOS-specific** (mac only) | see `references/ios.md` | Xcode CLT, simulators; physical devices go through WDA + provisioning (installing the agent on a physical device can reuse the app's own `build/ios/Debug-iphoneos/Runner.app/embedded.mobileprovision`); Linux has no iOS toolchain — Android only, automatically |
 
-`npx mobilewright doctor --json` 可作跨平台体检入口(覆盖 Node/mobilecli/Xcode/Simulators/agent/Java/ADB),再叠 `flutter doctor` + patrol。详见 `references/android.md`、`references/ios.md`。
+`npx mobilewright doctor --json` works as a cross-platform health-check entry point (covers Node/mobilecli/Xcode/Simulators/agent/Java/ADB); stack `flutter doctor` + patrol on top. Details in `references/android.md` and `references/ios.md`.
 
-**红线(默认禁止,用户事先明确授权才做)**:① 设备物理掉线/没插——物理阻塞,自救一次仍失败才停下报告;② 花真钱/影响真实用户的操作(支付/扣费/转账/下单;区块链 App 的上链交易同理);③ 密钥/凭证操作(生产密钥/签名证书/用户凭证/私钥助记词);④ 不可逆破坏(删数据/改生产)。②③④ **默认一律不做**,唯一解锁方式是用户**事先明确授权**——本次指令说明,或项目 `CLAUDE.md` 里写明允许哪类、什么范围(如「沙箱支付可下单」「测试链可发交易」),且只做写明的范围。未授权时:交互会话可停下问一句;**无人值守不问不等——跳过该项、报告标注「需授权:<操作>」,继续下个任务**。绝不把「测试需要」当授权。项目 `CLAUDE.md` 里写的项目特有红线同等效力。
+**Red lines (deny by default; only done with the user's explicit prior authorization)**: ① device physically disconnected/unplugged — a physical blocker; report and stop only after one self-recovery attempt fails; ② operations that spend real money / affect real users (payment/charging/transfer/placing orders; on-chain transactions in a blockchain app are the same thing); ③ key/credential operations (production keys/signing certificates/user credentials/private keys & mnemonics); ④ irreversible destruction (deleting data/modifying production). ②③④ are **never done by default**; the only unlock is the user's **explicit prior authorization** — stated in this session's instruction, or written in the project `CLAUDE.md`, specifying which category and what scope is allowed (e.g. "sandbox payments may place orders", "the test chain may send transactions") — and you only do what is spelled out there. When not authorized: an interactive session may stop and ask once; **unattended, don't ask and don't wait — skip that item, mark "needs authorization: <operation>" in the report, and move on to the next task**. Never treat "the test needs it" as authorization. Project-specific red lines written in the project `CLAUDE.md` carry equal force.
 
-**绿区(红线之外的一切)**:装工具、改本地配置、补依赖、scaffold 测试、起停模拟器、装 WDA/agent——可逆、低风险,**自己做完接着干**,别把"工具没装好"当停下理由。全文再提「绿区」都指这一条。
+**Green zone (everything outside the red lines)**: installing tools, changing local config, adding dependencies, scaffolding tests, starting/stopping simulators, installing WDA/agent — reversible and low-risk, so **do it yourself and keep going**; never treat "the tool isn't installed" as a reason to stop. Every later mention of "green zone" means this.
 
-**回查**:全文再提「回查」也都指同一件事——**用一条独立命令证明结果,不从「我执行了 X」推断「X 生效了」**。装完回查版本、点完回查落点、滑完回查位移、关完回查前台、断过网回查连通,都是它。设备侧的命令**失败时退出码常常照样是 0**,所以「结果」这一步得自己去取。回查取的是**机器可判的证据**(dump 比对、前台包名、返回码);肉眼看截图判观感是另一回事,那叫**截图核验**——两样都要,别互相顶替。
+**Re-check**: every later mention of "re-check" also means one thing — **prove the result with an independent command; never infer "X took effect" from "I ran X"**. Re-check the version after installing, where a tap landed, that a swipe moved something, the foreground after closing, connectivity after cutting the network. Device-side commands **routinely exit 0 even when they failed**, so the "result" half is yours to go and fetch. A re-check takes **machine-decidable evidence** (a dump comparison, the foreground package, a return code); eyeballing a screenshot for how it looks is the other thing — **screenshot verification** — and neither substitutes for the other.
 
-**装不上时先分清「渠道」还是「权限」**:
-- **渠道问题**(包管理源被挡,典型是企业网关拦 npm):**仍在绿区**——绿区看的是「目标」不是「渠道」,换条路继续。`bash scripts/bootstrap.sh` 已内置 GitHub Releases 自动回退;手动做法与坑 → `references/restricted-network.md`。
-- **权限问题**(只有人在 GUI 里能给:macOS 辅助功能、设备「允许 USB 调试」、iOS 开发者模式、`xcode-select --install` 弹窗):**真停**,和设备物理掉线同级。交互可问一句;无人值守跳过并在报告写明「需人工授权:在哪点什么」,继续下个任务。
+**When an install fails, first tell "channel" from "permission"**:
+- **Channel problem** (the package source is blocked — typically a corporate gateway blocking npm): **still the green zone** — the green zone is about the *goal*, not the *channel*, so take another route and keep going. `bash scripts/bootstrap.sh` already has an automatic GitHub Releases fallback built in; the manual route and its traps → `references/restricted-network.md`.
+- **Permission problem** (only a human at the GUI can grant it: macOS Accessibility, the device's "Allow USB debugging" prompt, iOS Developer Mode, the `xcode-select --install` dialog): **a genuine stop**, on par with a physically disconnected device. Interactive: ask once. Unattended: skip and write "needs human authorization: click what, where" in the report, then move on to the next task.
 
-**同理:被测功能的前置状态(登录态 / 钱包 / 实名 / 种子数据)也归「只有人能给」这一类**——不登录就什么都验不了,而这不是你能自己装出来的东西。**但别一上来就问**:设备上多半已经是登录好的状态(用户平时就在这台机器上开发),先起 App 看一眼再说;没登录也先试试能不能绕(deeplink 直达被测页、debug-only 出口用 VM Service `evaluate` 一步摆状态,见 `references/vm-service.md` §3.6)。**绕不过才停**,而且要**说清楚卡在哪、缺什么**——用户可能当场把测试账号发给你、自己去点两下、或者授权你注册一个测试账号(注册本身属绿区;**绝不动真实用户账号**,见红线③)。拿到之后本次会话记住接着跑,别每步再问。无人值守同样跳过并标注「需人工:<缺什么>」,继续下个任务。
-
----
-
-## 核心认知:Flutter 控件怎么找——三条互补的路
-
-Flutter 用 Skia/Impeller 画 canvas,系统无障碍树**默认**几乎空,但这**不等于找不到控件**:
-
-1. **Dart VM 直连(Patrol / integration_test)**:走 widget 树按 `Key` 精确查找+断言,**可复跑、出 pass/fail**。→ **确定性回归**用它。这是 Flutter 唯一不依赖无障碍树暴露、iOS/Android 都稳的断言路径。
-2. **无障碍树驱动(mobilecli `dump ui` / mobile-mcp `list_elements`)**:**只要控件暴露 `Semantics` label**,返回 label + **设备像素 rect**,取中心直接点,无需换算。→ **交互式探索/导航/一次性验证**用它,比盲点坐标又快又准。**只有它能点**。
-3. **VM Service 内省(`flutter run` 已开的那条通道)**:不写测试、不重新构建,直接从跑着的 App 里取 widget 树(**带 `Key` 和源码行号**)、render 树(**真实 constraints/size**)、运行时状态、结构化错误。→ **诊断/取证/断言但不需要点**时用它。详见 `references/vm-service.md`。
-
-三条的分工:**要点用②,要证据用③,要回归用①**。②③互补的关键在于 ③ **不依赖无障碍树**——控件没包 `Semantics`、`dump ui` 列不出,widget 树照样列得出还给行号。
-
-只有**纯 canvas 绘制**(图表内部、无 Semantics 包裹的元素)**在「点」这件事上**三条都给不了坐标——那种才回退「截图肉眼 + 量坐标换算」。但「在不在、对不对」的判断,③ 始终有效,别因为点不到就连判断也降级。
+**Likewise: the prerequisite state a feature needs (being logged in / a wallet / identity verification / seed data) belongs to the same "only a human can give it" class** — nothing can be verified behind a login wall, and it isn't something you can install your way past. **But don't lead with the question**: the device is usually already logged in (the user develops on this very machine), so launch the app and look first; if it isn't, try to route around it (a deeplink straight to the page under test, or a debug-only hook that sets state in one step via VM Service `evaluate` — see `references/vm-service.md` §3.6). **Stop only when you can't route around it**, and say exactly what you're stuck on and what's missing — the user may hand you a test account right there, tap through it themselves, or authorize you to register a test account (registering is green zone; **never touch a real user's account**, see red line ③). Once you have it, remember it for this session and keep going instead of asking at every step. Unattended: likewise skip, mark "needs a human: <what's missing>", and move on to the next task.
 
 ---
 
-## 工具决策树(底座统一 mobilecli)
+## Core insight: how to find Flutter widgets — three complementary paths
 
-| 场景 | 用什么 | 关键 |
+Flutter paints a canvas via Skia/Impeller, so the system accessibility tree is **by default** nearly empty — but that **does not mean widgets can't be found**:
+
+1. **Direct Dart VM connection (Patrol / integration_test)**: walks the widget tree, locating by `Key` with exact matching + assertions, **repeatable, produces pass/fail**. → use it for **deterministic regression**. This is Flutter's only assertion path that doesn't depend on accessibility-tree exposure and is stable on both iOS and Android.
+2. **Accessibility-tree driven (mobilecli `dump ui` / mobile-mcp `list_elements`)**: **as long as the widget exposes a `Semantics` label**, it returns label + **device-pixel rect**; take the center and tap directly, no conversion needed. → use it for **interactive exploration / navigation / one-off verification**; far faster and more accurate than blind coordinates. **It is the only one that can tap.**
+3. **VM Service introspection (the channel `flutter run` already opened)**: without writing a test and without rebuilding, pull the widget tree (**with `Key` and source line numbers**), the render tree (**real constraints/size**), runtime state, and structured errors straight out of the running app. → use it when you need **diagnosis/evidence/assertions but no tapping**. See `references/vm-service.md`.
+
+The division of labor: **to tap use ②, for evidence use ③, for regression use ①**. What makes ③ complementary to ② is that it **does not depend on the accessibility tree** — a widget with no `Semantics` wrapper that `dump ui` cannot list still shows up in the widget tree, with a source line number.
+
+Only **pure canvas painting** (chart internals, elements with no `Semantics` wrapper) leaves all three unable to give coordinates **for the purpose of tapping** — that's the only case that falls back to "screenshot by eye + measure and convert coordinates". But for judging **whether something exists and whether it's right**, ③ still works — don't downgrade your *judgment* just because you can't tap.
+
+---
+
+## Tool decision tree (mobilecli is always the base)
+
+| Scenario | Use | Key point |
 |---|---|---|
-| **即时交互/探索**(要点、要输入、要滑) | **mobilecli** | 已装二进制,免 MCP/重启;`dump ui`→`io tap` 坐标级 |
-| **诊断/取证**(控件在不在、哪行代码画的、布局尺寸、报没报错) | **VM Service** | `flutter run` 已开的通道,一行 curl;不依赖 Semantics,带源码行号 → `references/vm-service.md` |
-| MCP 工具流(已注册时) | **mobile-mcp** | 同引擎 MCP 化,`list_elements`→`click`;改配置下次会话才生效 |
-| **可复跑 Flutter 断言**(进 CI) | **Patrol** | Dart VM 按 Key,iOS/Android 都稳 |
-| TS 可复跑脚本/系统级/跨 app | mobilewright | `getByLabel().tap()` auto-wait;但 **Flutter 标 ⏳ 未正式支持**,Flutter 断言仍用 Patrol |
-| 平台末选(纯 canvas 盲点) | adb(Android) / simctl·WDA(iOS) | 有 Semantics 一律走元素驱动 |
+| **Instant interaction/exploration** (tap, type, swipe) | **mobilecli** | Installed binary, no MCP/restart; `dump ui` → `io tap`, coordinate-level |
+| **Diagnosis/evidence** (does the widget exist, which line painted it, layout size, any errors) | **VM Service** | The channel `flutter run` already opened, one curl; no Semantics dependency, carries source line numbers → `references/vm-service.md` |
+| MCP tool flow (when registered) | **mobile-mcp** | Same engine, MCP-wrapped; `list_elements` → `click`; config changes only take effect next session |
+| **Repeatable Flutter assertions** (into CI) | **Patrol** | Dart VM by Key, stable on both iOS and Android |
+| TS repeatable scripts / system level / cross-app | mobilewright | `getByLabel().tap()` with auto-wait; but **Flutter is marked ⏳ not officially supported** — Flutter assertions still go to Patrol |
+| Platform last resort (pure canvas, blind coordinates) | adb (Android) / simctl·WDA (iOS) | If Semantics exists, always go element-driven |
 
-> ⚠️ **mobilecli / mobile-mcp 都是坐标级**,没有"按 label 一步点"的原生命令(`query/getBy` 只作用于 webview,不作用于原生/Flutter Semantics)。一步到位用 `scripts/tap-by-label.sh`(零依赖 jq)。选型细节见 `references/tool-decision-tree.md`。
+> ⚠️ **mobilecli / mobile-mcp are both coordinate-level** — there is no native "tap by label in one step" command (`query/getBy` only applies to webviews, not to native/Flutter Semantics). For one-step tapping use `scripts/tap-by-label.sh` (zero deps beyond jq). Selection details in `references/tool-decision-tree.md`.
 
 ---
 
-## 元素驱动交互:首选(检视优先 → 按 label 点中心)
+## Element-driven interaction: the default (inspect first → tap the label's center)
 
-需要在设备上「自己点、自己看、流畅推进」时(导航、探索、一次性交互验证),**首选这条,而非盲点坐标**。
+When you need to "tap it yourself, look at it yourself, and keep moving" on the device (navigation, exploration, one-off interaction checks), **prefer this over blind coordinates**.
 
-**检视优先**:动手前先 `dump ui`,**绝不猜元素名**。
-**一步到位**:`scripts/tap-by-label.sh <deviceId> "<label子串>"`(内部 dump→jq 按 label 取 rect 中心→`io tap`)。手动等价:
+**Inspect first**: `dump ui` before you act — **never guess element names**.
+**One step**: `scripts/tap-by-label.sh <deviceId> "<label substring>"` (internally dump → jq picks the rect by label → taps the center via `io tap`). The manual equivalent:
 
 ```bash
-D=$(mobilecli devices | jq -r '.data.devices[0].id')   # 输出是 {status,data:{devices:[…]}};运行期现取,绝不写死
-UI=/tmp/ui.json; SHOT=/tmp/shot.png                     # dump/截图落文件再挑,别整块进上下文
-APP=<applicationId 或 bundleId>                         # §1 已自己探到(build.gradle / project.pbxproj),双端取值不同
-mobilecli apps launch     --device "$D" "$APP"          # 拉前台
-mobilecli apps foreground --device "$D"                 # 确认前台=目标 App(防串台)
-mobilecli dump ui         --device "$D" > "$UI"         # label + 设备像素 rect{x,y,width,height}
-# 按 label 挑目标,点 rect 中心 (x+width/2, y+height/2):
+D=$(mobilecli devices | jq -r '.data.devices[0].id')   # output is {status,data:{devices:[…]}}; taken live at runtime, never hardcoded
+UI=/tmp/ui.json; SHOT=/tmp/shot.png                     # dump/screenshot to a file, then pick — don't dump the whole blob into context
+APP=<applicationId or bundleId>                         # you already detected it in §1 (build.gradle / project.pbxproj); differs per platform
+mobilecli apps launch     --device "$D" "$APP"          # bring to foreground
+mobilecli apps foreground --device "$D"                 # confirm foreground = target app (anti cross-talk)
+mobilecli dump ui         --device "$D" > "$UI"         # label + device-pixel rect{x,y,width,height}
+# pick the target by label, tap the rect center (x+width/2, y+height/2):
 mobilecli io tap   --device "$D" <cx>,<cy>
-mobilecli io swipe --device "$D" x1,y1,x2,y2            # 滑块/列表滚动/下拉刷新
-mobilecli io text  --device "$D" "文本"                 # 系统输入框
-mobilecli io button --device "$D" BACK                  # 退回(iOS 无 BACK,用手势/导航栏 tap)
-mobilecli screenshot --device "$D" -o "$SHOT"           # 截图 → Read 核验
+mobilecli io swipe --device "$D" x1,y1,x2,y2            # sliders / list scrolling / pull-to-refresh
+mobilecli io text  --device "$D" "text"                 # system text fields only
+mobilecli io button --device "$D" BACK                  # go back (iOS has no BACK — use a gesture / tap the nav bar)
+mobilecli screenshot --device "$D" -o "$SHOT"           # screenshot → Read to verify
 ```
 
-**Flutter 定位优先级(由稳到脆)**:Patrol `Key`(回归最稳) > `Semantics(identifier:)`(不随文案/语言变) > `Semantics` label 精确 > role/`button:true` 标志 > label 子串/正则 > 纯文本 > 盲点坐标(末选)。
+**Flutter locator priority (most to least robust)**: Patrol `Key` (most robust for regression) > `Semantics(identifier:)` (immune to copy and locale changes) > exact `Semantics` label > role/`button:true` flag > label substring/regex > plain text > blind coordinates (last resort).
 
-要点:坐标取 `dump ui` rect 中心**不盲猜**;Flutter **自绘数字键盘/自定义手势控件不是系统输入框**,`io text` 喂不进 → 逐个 `io tap` 键坐标;某控件列不出 = 没暴露 Semantics → **回代码补**(下)。深链跳关:`mobilecli device url <deeplink>` 直达页面,省逐级导航。
+Key points: take coordinates from the `dump ui` rect center, **never guess**; Flutter's **custom-painted numeric keypads and custom gesture widgets are not system text fields** — `io text` won't reach them → tap each key's coordinates with `io tap`; if a widget can't be listed = it doesn't expose Semantics → **go fix the code** (below). Deeplink shortcut: `mobilecli device url <deeplink>` jumps straight to a page, skipping step-by-step navigation.
 
-**「静默失败」清单——发出去 ≠ 生效**。底座只保证「事件发出去了」,不保证「Flutter 收下并识别了」:`io swipe`(Flutter 滚动手势对合成事件的时长/步进敏感,典型表现是屏幕纹丝不动)、合成 `io longpress`(WDA 合成的长按 Flutter 侧可能不认,典型是 AppBar 标题上的 `GestureDetector` 长按)、以及**点在了包住目标的容器空白处**(Semantics 合并后祖先节点的 label 天然含子串,`dump ui` 里它还排在叶子前面——按 rect 面积挑最小的那个)。这类命令**发完就回查**:滑动后重新 `dump ui` 比对锚点元素的 `rect.y` 有没有变(或前后截图对比),点完回查落点、点错了 `io button BACK` 退回;没变就加大位移/放慢时长重试一次,**两次不动就换路径**(deeplink 直达、或 Patrol 的 `scrollTo` 让 Dart 侧自己滚)。长按这类**根本打不进去的手势,正解是回代码**——换成有 `Semantics` 的可点控件,和「列不出=回代码补」同一条原则,顺带人工测试也更好用。「点了没反应」这类判断,真因多半在这一段。
+**The "silent failure" list — sent ≠ took effect.** The backend only guarantees "the event was dispatched", not "Flutter received and recognized it": `io swipe` (Flutter's scroll gestures are sensitive to a synthesized event's duration/step, and the typical symptom is a screen that doesn't move at all), a synthesized `io longpress` (a WDA-synthesized long-press may not be recognized on the Flutter side — typically a long-press `GestureDetector` on an AppBar title), and **tapping the blank area of a container that wraps your target** (after Semantics merging an ancestor's label naturally contains the substring, and in `dump ui` it comes *before* the leaf — pick the smallest rect by area). **Re-check these the moment you send them**: after a swipe, `dump ui` again and compare an anchor element's `rect.y` (or diff before/after screenshots); after a tap, re-check where it landed and `io button BACK` out if it landed wrong; if nothing moved, retry once with a longer distance / slower duration, and **if it doesn't move twice, change route** (deeplink straight to the page, or let the Dart side scroll itself via Patrol's `scrollTo`). For a gesture that simply **cannot be delivered — a long-press being the usual one — the fix is in the code**: replace it with a tappable widget that has `Semantics`, the same "can't list it = go fix the code" principle (which also makes manual testing better). A "tapped it, nothing happened" conclusion usually traces back to this paragraph.
 
 ---
 
-## 代码契约:每个可交互/可断言控件加 Key + Semantics
+## Code contract: every interactive/assertable widget gets a Key + Semantics
 
-两条路各吃一样,都加上,控件才"天生可测":`Key` 给 Patrol(命名 `<功能>_<控件类型>` 小写下划线);`Semantics` 给元素驱动。标准 `Text`/`ElevatedButton` 文本自带 label;**自定义手势控件(`Touchable`/`GestureDetector`/`InkWell`)默认列不出,务必显式包 `Semantics`**。
+The two paths each consume a different thing — add both, and the widget becomes "testable by construction": `Key` for Patrol (named `<feature>_<widget_type>`, lowercase with underscores); `Semantics` for element-driven interaction. Standard `Text`/`ElevatedButton` text carries a label already; **custom gesture widgets (`Touchable`/`GestureDetector`/`InkWell`) can't be listed by default — always wrap them explicitly in `Semantics`**.
 
-**`label` 会变,`identifier` 不会**——两个都给:`Semantics(label:)` 是**给人读的可见文案**,改一版文案、切一次语言,按它定位的脚本就碎(多语言项目必踩);`Semantics(identifier:)`(Flutter 3.19+)是**专给自动化的稳定 id**,映射到 Android resource-id / iOS accessibilityIdentifier,`dump ui` 里作为 `identifier` 字段返回,`scripts/tap-by-label.sh` 已把它纳入匹配集。**`identifier` 直接复用你给 `Key` 的那个名字**——一份命名同时喂 Patrol 和元素驱动,定位时优先传它、别传 label。
+**A `label` changes, an `identifier` doesn't — give both.** `Semantics(label:)` is **human-readable visible copy**: reword it once, or switch locale once, and anything locating by it breaks (a multi-language project will hit this). `Semantics(identifier:)` (Flutter 3.19+) is **the stable id meant for automation**, mapping to Android's resource-id / iOS's accessibilityIdentifier, returned as the `identifier` field in `dump ui`, and already part of the match set in `scripts/tap-by-label.sh`. **Reuse the same name you gave `Key` as the `identifier`** — one naming feeds both Patrol and element-driven interaction, and you locate by it rather than by the label.
 
 ```dart
-ElevatedButton(key: const Key('submit_btn'), onPressed: _submit, child: const Text('提交'))
+ElevatedButton(key: const Key('submit_btn'), onPressed: _submit, child: const Text('Submit'))
 
-Semantics(label: '滑动买入', identifier: 'swap_slide_btn', button: true,   // 自定义手势:不包 Semantics 就 dump 不出
+Semantics(label: 'Slide to buy', identifier: 'swap_slide_btn', button: true,   // custom gesture: without Semantics it won't show in dump
   child: GestureDetector(key: const Key('swap_slide_btn'), onTap: _buy, child: customSlider))
 
 TextField(key: const Key('email_input'), controller: _c)
 Text(_err, key: const Key('error_text'))
-Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不在某页"
+Scaffold(key: const Key('home_screen'), ...)        // page root: to judge "am I on this page"
 ```
 
-> 自查(人工):`dump ui` 列不出你的控件 = 没暴露 Semantics → 回代码补 `Semantics(label:)`,把"测不到"当代码缺陷修,别降级盲点。
+> Self-check (manual): if `dump ui` can't list your widget = it doesn't expose Semantics → go back to the code and add `Semantics(label:)`. Treat "can't be tested" as a code defect to fix, not a reason to downgrade to blind coordinates.
 >
-> **自查(自动,更该用这条)**:这条契约能被机器判定,别等上了设备才发现。在 widget test 里加 `await expectLater(tester, meetsGuideline(labeledTapTargetGuideline))`——**没包 `Semantics` 的 `GestureDetector` 会直接判失败并给出 rect**;`androidTapTargetGuideline`/`iOSTapTargetGuideline` 判热区是否够 48×48、`textContrastGuideline` 判对比度。秒级、无设备,把"控件天生可测"从口头约定变成 CI 拦得住的断言。写法见 `references/offline-test-layer.md`。
+> **Self-check (automatic — prefer this one)**: this contract is machine-checkable, so don't wait until you're on a device to find out. Add `await expectLater(tester, meetsGuideline(labeledTapTargetGuideline))` to a widget test — **a `GestureDetector` with no `Semantics` fails outright and reports its rect**; `androidTapTargetGuideline`/`iOSTapTargetGuideline` check whether the hit area is at least 48×48, and `textContrastGuideline` checks contrast. Sub-second, no device, and it turns "testable by construction" from a verbal convention into an assertion CI can block on. How to write it: `references/offline-test-layer.md`.
 
 ---
 
-## 验证分层:主场在设备层,离线层是给它让路的
+## Verification layering: the device layer is the main event; the offline layer exists to clear the way for it
 
-**先明确主次**:本 skill 的产出是**「App 在设备上真跑起来、UI 确实对」的证据**——那在 B 段。A 段离线层的作用是**把不值得占用设备时间的东西先筛掉**(纯逻辑 bug 不该花 30 分钟真机时间去定位),好让设备时间集中在只有设备能验的事上。**A 是为 B 让路的,不是 B 的替代品。**
+**Get the priority straight first**: this skill's output is **evidence that the app really ran on a device and the UI really is right** — that's group B. Group A, the offline layer, exists to **filter out everything that doesn't deserve device time** (a pure-logic bug should not cost 30 minutes of real-device time to locate), so that device time is spent only on what only a device can verify. **A clears the way for B; it is not a substitute for B.**
 
-**A. 离线层——无设备、秒级,上设备前先过一遍**(详见 `references/offline-test-layer.md`)
+**A. Offline layer — no device, sub-second; run it before going to the device** (details in `references/offline-test-layer.md`)
 
-| 层 | 验什么 | 怎么验 |
+| Layer | Verifies | How |
 |---|---|---|
-| ① **纯逻辑 fixture** | 解码/解析/数值/状态机/错误处理 | `flutter test` / `dart test` + fixture/mock(真实数据 JSON / 手搓字节 / forTesting 注入 / probe 四策略) |
-| ② **widget test** | 控件交互/页面跳转/表单/条件渲染的**行为回归网** | `testWidgets` + `tester.tap` + 按 `Key` 断言。锁住"逻辑上不回退",**不代表真机上好用** |
-| ③ **golden 矩阵 + a11y guideline** | 视觉回归(主题×字号矩阵) / 无障碍契约自检 | `matchesGoldenFile` 出**量化 diff + 只画变化区域的图**;`meetsGuideline` 自动判 label 缺失·热区过小·对比度不足 |
+| ① **Pure-logic fixtures** | decode/parse/numerics/state machines/error handling | `flutter test` / `dart test` + fixtures/mocks (four strategies: real-data JSON / hand-built bytes / forTesting injection / probe) |
+| ② **widget test** | a **behavioral regression net** for widget interaction/navigation/forms/conditional rendering | `testWidgets` + `tester.tap` + assertions by `Key`. Locks in "no logical regression"; **says nothing about whether it works on a real device** |
+| ③ **golden matrix + a11y guideline** | visual regression (theme × font-scale matrix) / accessibility-contract self-check | `matchesGoldenFile` gives a **quantified diff plus an image of only the changed region**; `meetsGuideline` automatically catches missing labels, undersized hit areas, insufficient contrast |
 
-**B. 设备层——本 skill 的主场:真实渲染、真机交互、系统集成、真实数据**
+**B. Device layer — this skill's main event: real rendering, real-device interaction, system integration, real data**
 
-| 层 | 验什么 | 怎么验 |
+| Layer | Verifies | How |
 |---|---|---|
-| ④ **VM Service 内省(取证)** | 控件在不在/是哪行代码画的/布局真实尺寸/这步有没有报错 | 一行 curl 取 widget 树(带 Key+行号)、render 树(constraints/size)、`errorsSinceReload` → `references/vm-service.md` |
-| ⑤ **元素驱动(一次性)** | 真机上的交互/跳转/数据展示 | `dump ui`→点中心 + 截图 |
-| ⑥ **Patrol(可复跑)** | 同⑤但要回归断言、进 CI | 按 Key,出 pass/fail |
-| ⑦ **日志(取证)** | 连接/状态机/gating——**发生没发生用日志,不用截图** | `adb logcat -s flutter`(Android)/`flutter logs` / `xcrun simctl spawn <udid> log stream`(iOS);清缓冲→执行动作→只读这一步的日志窗口再断言 |
+| ④ **VM Service introspection (evidence)** | does the widget exist / which line painted it / real layout size / did this step error | one curl for the widget tree (with Key + line numbers), the render tree (constraints/size), `errorsSinceReload` → `references/vm-service.md` |
+| ⑤ **Element-driven (one-off)** | interaction/navigation/data display on a real device | `dump ui` → tap the center + screenshot |
+| ⑥ **Patrol (repeatable)** | same as ⑤ but as a regression assertion, into CI | by Key, produces pass/fail |
+| ⑦ **Logs (evidence)** | connections/state machines/gating — **use logs, not screenshots, to prove something did or didn't happen** | `adb logcat -s flutter` (Android) / `flutter logs` / `xcrun simctl spawn <udid> log stream` (iOS); clear the buffer → perform the action → read only that step's log window, then assert |
 
-**闭环顺序**:`flutter analyze` → `flutter test`(①②③ 一把跑完,秒级) → 元素驱动/VM Service(一次性) → Patrol(可复跑)。**离线层先全绿再上设备**。
+**Loop order**: `flutter analyze` → `flutter test` (①②③ in one sub-second run) → element-driven/VM Service (one-off) → Patrol (repeatable). **Get the offline layer all-green before going to the device.**
 
-**选层铁律(两个方向都要管住,别只记一半)**:
+**Iron rules for picking a layer (both directions matter — don't remember only half)**:
 
-**→ 向下(省设备时间)**:`null` 检查、解析出错、算错数这类**纯逻辑 bug,不该拿真机时间去定位**——离线层秒级就能定位到行。同理,反复回归的静态视觉(深色模式/大字号下的排版)可以用 golden 锁住,不必每次人工重看。**离线层的意义是让设备时间花在刀刃上。**
+**→ Downward (save device time)**: `null` checks, parse failures, wrong arithmetic — **pure-logic bugs must not cost real-device time to locate**; the offline layer pinpoints the line in seconds. Likewise, repeatedly-regressed static visuals (layout in dark mode / at large font scale) can be locked down with goldens instead of being eyeballed every time. **The offline layer exists so device time goes where it counts.**
 
-**← 向上(不许拿离线绿冒充 UI 验过)——这条更重要**:widget test 跑在**无头环境**,不经真实渲染管线、没有真实字体度量、没有平台通道、没有真机时序。它能证「逻辑上该显示 X」,**证不了「真机上看起来对」**。所以:改了 UI 就上设备真跑一次并截图,golden 只是回归网、不替代这次亲眼看一眼;**拿不准该不该上,就上**——漏看一次 UI 的代价,远大于多跑一次设备。
+**← Upward (never pass offline-green off as UI-verified) — this one matters more**: widget tests run in a **headless environment** — no real rendering pipeline, no real font metrics, no platform channels, no real-device timing. They can prove "logically it should display X"; they **cannot prove "it looks right on a real device"**. So: if you changed UI, run it on a device once and take a screenshot — goldens are only a regression net, not a substitute for looking at it yourself this time; **when in doubt about whether to go to the device, go**. The cost of missing a UI problem far exceeds the cost of one extra device run.
 
-**层内选择(已经决定要上设备之后)**:「控件找不到 / Key 对不对 / 布局为什么歪」——**别先截图**,用 ④ 看 widget 树和 constraints,一步到源码行,再截图确认观感。
+**Choosing within the device layer (once you've decided to go on-device)**: "can't find the widget / is the Key right / why is the layout skewed" — **don't screenshot first**; use ④ to read the widget tree and constraints, jump straight to the source line, then screenshot to confirm the look.
 
 ---
 
-## 自主开发完整循环 + 失败决策树
+## The full autonomous loop + failure decision tree
 
 ```
-读任务 → 自展开验收标准(3~8 条可断言,逐条标好落哪层)
-  → 写实现(关键控件加 Key+Semantics)+ 写配套测试(离线①②③ 能覆盖的先写在离线层)
-  → flutter analyze(零警告)
-  → flutter test(离线层 ①②③)   ── 挂?逻辑/行为/视觉契约 bug,不上设备直接修
-  → 确认设备在线(mobilecli devices;离线自救一次仍离线才停)
+read the task → self-expand acceptance criteria (3–8 assertable items, each tagged with its layer)
+  → write the implementation (Key+Semantics on key widgets) + companion tests (whatever offline ①②③ can cover goes offline first)
+  → flutter analyze (zero warnings)
+  → flutter test (offline layers ①②③)   ── failing? logic/behavior/visual-contract bug; fix it without touching a device
+  → confirm a device is online (mobilecli devices; one self-recovery attempt, stop only if still offline)
   → patrol test --device <id> -t integration_test/<feature>_test.dart
-      ├─ 通过 → 截图核验 → (按用户提交策略:增量提/最后提/不提)→ 输出报告
-      └─ 失败 → 失败分析(≤5 轮;找不到控件先查 VM Service widget 树)→ 修 → 重跑
-                5 轮仍败 → 停,出卡住报告,继续下个任务
+      ├─ pass → screenshot verification → (per the user's commit policy: incremental / final / none) → emit the report
+      └─ fail → failure analysis (≤5 rounds; if a widget can't be found, check the VM Service widget tree first) → fix → rerun
+                still failing after 5 rounds → stop, emit a "stuck" report, move on to the next task
 ```
 
-**第一步「自展开验收标准」是整条闭环的方向盘**——后面所有的跑、点、看都由它决定验什么、验到哪算完。把一句话需求拆成 3~8 条**能判真假**的条目,每条当场标好落哪层;**标不出层,说明这条还没写成可断言的**,先改写再开工。
+**Step one — self-expanding the acceptance criteria — is the steering wheel of the whole loop**: everything that follows (what to run, tap, and look at) is decided by it. Break a one-line requirement into 3–8 items that can be **judged true or false**, and tag each one with its layer right then; **if you can't tag a layer, that item isn't assertable yet** — rewrite it before starting.
 
-需求「登录页加个『记住我』」展开后:
+The requirement "add a *Remember me* option to the login page" expands to:
 
-| # | 验收条目(能判真假) | 落哪层 |
+| # | Acceptance item (true/false decidable) | Layer |
 |---|---|---|
-| 1 | 勾选后杀掉重开,邮箱框预填上次的值 | ② widget test(持久化逻辑) |
-| 2 | 不勾选时重开,邮箱框为空 | ② widget test |
-| 3 | 真机上勾选框点得到、勾选态肉眼可见、深色模式下不糊 | ⑤ 元素驱动 + 截图(**只有设备能证**) |
-| 4 | 登录成功落到首页,过程中无新增 Flutter 错误 | ⑥ Patrol + ④ `errorsSinceReload` |
+| 1 | With it checked, kill and relaunch: the email field is pre-filled with the last value | ② widget test (persistence logic) |
+| 2 | With it unchecked, relaunch: the email field is empty | ② widget test |
+| 3 | On a real device the checkbox is tappable, the checked state is visibly clear, and it isn't muddy in dark mode | ⑤ element-driven + screenshot (**only a device can prove this**) |
+| 4 | A successful login lands on the home page with no new Flutter errors along the way | ⑥ Patrol + ④ `errorsSinceReload` |
 
-反例:「记住我功能正常」「体验流畅」——判不了真假,也标不出层。
+Counter-examples: "Remember me works fine", "the experience is smooth" — not decidable, and impossible to tag with a layer.
 
-**跑几端由改动性质决定**。先看项目实际发几端(`android/`、`ios/` 目录、CI 里在打哪些包)——**跑项目实际发的那几端**,只发一端就只跑那端:
+**How many platforms to run is decided by the nature of the change.** First check how many the project actually ships (the `android/` and `ios/` directories, which artifacts CI builds) — **run the platforms the project actually ships**, and a single-platform project runs that one only:
 
-- **发双端 + 改动碰了平台差异 → 必须双端**:平台通道/原生插件/权限弹窗/输入法与键盘/安全区与刘海/系统返回手势,或排版对字体度量敏感。
-- **发双端但改动不碰这些**(纯 Dart 逻辑、纯 Flutter 自绘 UI):**单端跑透就够**,报告写明「仅在 <平台> 验证,原因:改动不涉平台差异」。
-- **顺序**:手边有模拟器就先模拟器(快、可多开、失败便宜),全绿后再上真机(验真实性能/权限/物理交互);只有真机就直接真机,不必为此去装模拟器。
-- **但有一类东西模拟器给不了,它的绿是假绿——这类直接上真机**:防截屏与安全层(`FLAG_SECURE`/iOS secure layer,模拟器照样截得到,看起来像"没生效")、真实性能与掉帧、生物识别、推送、相机与传感器、完整性/证明类 SDK、真实网络条件与弱网。**判据**:被测的东西依赖的是「真设备才有的能力或约束」,就跳过模拟器这一档。
-- **想跑但跑不了**(Linux 无 iOS 工具链、手上没那台真机):跑得了的跑透,跑不了的标「未验证:<平台>,原因:<无工具链/无设备>」——**不许把单端绿写成双端绿**。
+- **Ships both + the change touches platform differences → both are mandatory**: platform channels/native plugins/permission dialogs/IME & keyboard/safe areas & notches/system back gesture, or a layout sensitive to font metrics.
+- **Ships both but the change touches none of those** (pure Dart logic, pure Flutter-painted UI): **one platform, run thoroughly, is enough** — write in the report "verified on <platform> only; reason: the change involves no platform differences".
+- **Order**: if you have a simulator, simulator first (fast, multiple instances, cheap failures), then a real device once it's green (verifies real performance/permissions/physical interaction); if all you have is a real device, go straight there — don't install a simulator just for this.
+- **But one class of things a simulator cannot give you, and its green is a fake green — that class goes straight to a real device**: screenshot protection and secure layers (`FLAG_SECURE` / iOS secure layer — a simulator still captures fine, which looks exactly like "it didn't work"), real performance and jank, biometrics, push notifications, camera and sensors, integrity/attestation SDKs, real network conditions and weak networks. **The test**: if what's under test depends on a capability or constraint only a real device has, skip the simulator tier.
+- **You want to but can't** (Linux has no iOS toolchain, you don't have that physical device): run what you can thoroughly, and mark what you can't as "not verified: <platform>, reason: <no toolchain / no device>" — **never write single-platform green as both-platform green**.
 
-**每条验收条目开跑前,先把 App 复位到已知起点**。上一条留下的页面状态会变成下一条的错误起点——停在某个 bottom sheet 里、还开着筛选面板、卡在半截表单——**越往后越歪,而报告里完全看不出来**(每一步的截图都"有内容",只是验错了页面);无人值守连跑时这种漂移会被逐条放大。复位就三步:`apps terminate` → `apps launch` → `dump ui` 确认落在预期起点,几秒的成本换掉整条验收作废的风险。起点和收尾一样要**回查**:`dump ui` 说落在首页,才算落在首页。
+**Before each acceptance item, reset the app to a known starting point.** Whatever state the previous item left behind becomes the next item's wrong starting point — parked inside a bottom sheet, a filter panel still open, stuck halfway through a form — and **it drifts further with every item while the report shows nothing wrong** (every screenshot "has content"; it's just the wrong page being verified). Running unattended, that drift compounds item by item. The reset is three steps: `apps terminate` → `apps launch` → `dump ui` to confirm you landed on the expected starting point. A few seconds buys off the risk of an entire item being invalid. The starting point gets **re-checked** like teardown does: you're on the home screen when `dump ui` says you are.
 
-**完成门槛(报告)**:闭环的终点是一份报告,必须含 ① `✅/❌ 功能名` + **逐条验收对照**(含第 5 轮卡住项)② 改动文件清单 ③ 关键截图 ④(若按策略提交了)commit hash + message ⑤ 遗留问题。**缺一项不算完成**——无人值守时你早上是靠这份证据收割的,不是靠"它说做完了"。
+**Completion bar (the report)**: the loop ends in a report that must contain ① `✅/❌ feature name` + a **per-item acceptance table** (including items stuck at round 5) ② the list of changed files ③ key screenshots ④ (if committed per policy) commit hash + message ⑤ open issues. **Missing any one of these means it isn't done** — when running unattended, this evidence is what you harvest in the morning, not "it said it finished".
 
-**失败分类**:编译错→`flutter analyze` 读错误修;`found 0 widgets`→**先用 VM Service 拉 widget 树核对 Key**(带源码行号,比翻代码快),再查是否需 scroll/条件渲染;断言失败→**逻辑 bug 改实现,不改测试降标准**;crash/超时→`mobilecli device crashes list|get` 读堆栈第一行 `package:<your_app>/`;安装/连接→`mobilecli devices` + 自救一次仍失败停。
+**Failure classification**: compile errors → read the `flutter analyze` output and fix; `found 0 widgets` → **pull the widget tree from the VM Service first to check the Key** (it carries source line numbers, faster than grepping code), then check whether a scroll / conditional render is needed; assertion failures → **it's a logic bug, fix the implementation, don't lower the test's bar**; crash/timeout → `mobilecli device crashes list|get` and read the first stack line matching `package:<your_app>/`; install/connection → `mobilecli devices` + one self-recovery attempt, stop if it still fails.
 
-**Patrol 命令**:`patrol test -t <file> --device <id> [--timeout 300]`(自动构建+装+跑);构建失败 `flutter clean && flutter pub get && patrol test`。写法模板:
+**Patrol commands**: `patrol test -t <file> --device <id> [--timeout 300]` (builds + installs + runs); on build failure `flutter clean && flutter pub get && patrol test`. Template:
 
 ```dart
 import 'package:patrol/patrol.dart';
-import 'package:<your_app>/main.dart';                 // 替换为实际包名
+import 'package:<your_app>/main.dart';                 // replace with the real package name
 
-void main() => patrolTest('用户可用邮箱登录', ($) async {
+void main() => patrolTest('user can log in with email', ($) async {
   await $.pumpWidgetAndSettle(const MyApp());
   await $(#email_input).enterText('test@example.com');
   await $(#submit_btn).tap();
   await $.pumpAndSettle();
-  expect($(#home_screen), findsOneWidget);             // 常用:$(#key)/$(Text('文字'))/.tap()/.enterText()/.scrollTo()
+  expect($(#home_screen), findsOneWidget);             // common: $(#key)/$(Text('...'))/.tap()/.enterText()/.scrollTo()
 });
 ```
 
 ---
 
-## flutter run 后台化 + 三档热重载(改一行就发信号)
+## Backgrounding flutter run + three-tier hot reload (change a line, send a signal)
 
-**前置**:同设备若被别的 `flutter run` 占用(如 VS Code 调试),先释放——`ps aux | grep "flutter_tools.snapshot run" | grep -v grep`,有则提示用户停掉再继续,不强启。
+**Precondition**: if the device is already occupied by another `flutter run` (e.g. a VS Code debug session), free it first — `ps aux | grep "flutter_tools.snapshot run" | grep -v grep`; if there is one, ask the user to stop it before continuing, don't force-start.
 
-**启动**:命令**必须以 `flutter run` 开头**(若你的权限规则按前缀匹配如 `Bash(flutter run:*)`,nohup/管道/`&` **包裹**会被拦),后台化靠 `run_in_background: true` 参数;带 `--pid-file`(默认 `/tmp/flutter_app.pid`,多设备/会话并发时拼项目或设备后缀避免撞)。
+**Launch**: the command **must start with `flutter run`** (if your permission rules match by prefix, e.g. `Bash(flutter run:*)`, **wrapping** it in nohup/pipes/`&` gets blocked). Backgrounding is done with the `run_in_background: true` parameter; pass `--pid-file` (default `/tmp/flutter_app.pid`; append a project or device suffix when running several devices/sessions concurrently so they don't collide).
 
-**同时要保证「构建输出还能读得到」**:后台化之后,构建失败的真正原因只在那份输出里。末尾追加 `> <LOG_FILE> 2>&1` 是最省事的做法(重定向跟在命令末尾,通常不影响前缀匹配);若你的权限配置把它拦下,就**别跟它较劲**——去读那个后台任务自己的输出(harness 提供的查看方式),效果一样。**要留一份能 `tail` 的东西,形式随便。**
+**You also have to keep the build output readable**: once backgrounded, the real reason a build failed lives only in that output. Appending `> <LOG_FILE> 2>&1` is the simplest way (a redirect at the end of the command usually doesn't affect prefix matching); if your permission setup blocks it, **don't fight it** — read the background task's own output through whatever your harness provides. **Keep something you can `tail`; the form doesn't matter.**
 
 ```bash
 flutter run -d <deviceId> --target <entry> \
-  --pid-file=<PID_FILE> --vmservice-out-file=<URI_FILE> <dart-defines,来源见 §1> \
+  --pid-file=<PID_FILE> --vmservice-out-file=<URI_FILE> <dart-defines — see §1 for where they come from> \
   > <LOG_FILE> 2>&1
 ```
 
-**等构建**(长驻进程不自发完成通知,另起后台 Bash 轮询)。**等的是 `--vmservice-out-file` 落盘**——文件非空 = App 起来且 VM Service 就绪,二值信号,不用解析人类可读输出。但**只等成功信号会挂死**:构建失败的方式太多(Gradle/CocoaPods/签名/`No supported devices`),枚举 grep 模式永远漏,所以**另外两个出口必须给全**——进程已死、超时:
+**Waiting for the build** (a long-lived process never notifies you on its own — poll from a separate background Bash). **What you wait on is `--vmservice-out-file` landing on disk** — a non-empty file means the app is up and the VM Service is ready: a binary signal, no parsing of human-readable output. But **waiting only on the success signal will hang forever**: there are too many ways a build can fail (Gradle/CocoaPods/signing/`No supported devices`) and an enumerated grep pattern will always miss one, so **the other two exits must be there too** — process died, and timeout:
 
 ```bash
-DEADLINE=$((SECONDS+600))                       # 只是「该回来看一眼」的闹钟,不是失败判据(下方说明)
+DEADLINE=$((SECONDS+600))                       # just an alarm clock saying "come check on it" — not a failure verdict (see below)
 while [ ! -s "<URI_FILE>" ]; do
   P=$(cat "<PID_FILE>" 2>/dev/null)
-  if [ -n "$P" ] && ! kill -0 "$P" 2>/dev/null; then echo "❌ flutter run 已退出"; break; fi
-  if [ "$SECONDS" -ge "$DEADLINE" ];        then echo "⏳ 到点未就绪,回来看一眼"; break; fi
+  if [ -n "$P" ] && ! kill -0 "$P" 2>/dev/null; then echo "❌ flutter run exited"; break; fi
+  if [ "$SECONDS" -ge "$DEADLINE" ];        then echo "⏳ not ready yet — come look"; break; fi
   sleep 2
 done
-[ -s "<URI_FILE>" ] && echo "✅ VM Service 就绪" || tail -40 "<LOG_FILE>"   # 未就绪时,真正的原因在这里
+[ -s "<URI_FILE>" ] && echo "✅ VM Service ready" || tail -40 "<LOG_FILE>"   # if it isn't ready, the real reason is here
 ```
 
-> 三个出口分别对应「起来了 / 死了 / 还没好」。**只有「进程已退出」是失败判据**;到点未就绪**不是**——冷仓首次 Gradle/CocoaPods、大工程、慢网、CI 容器里构建半小时都正常。到点时看 `<LOG_FILE>` 尾部:**进程还活着、日志还在长 = 还在编,再等一轮**(时限翻倍,别改成无限);日志停在某条错误上才是真卡住。**闹钟响了只说明该回来看一眼**——把它当构建失败去 `flutter clean` 重来,是把一次慢构建变成两次。
+> The three exits map to "it's up / it died / it's not ready yet". **Only "the process exited" is a failure verdict**; reaching the deadline is **not** — a cold-checkout first Gradle/CocoaPods build, a large project, a slow network, or a CI container can all legitimately take half an hour. When the alarm fires, read the tail of `<LOG_FILE>`: **process still alive and the log still growing = it's still compiling, so wait another round** (double the limit; don't make it unbounded). Only a log parked on an error is genuinely stuck. **The alarm means "come back and look", nothing more** — reading it as a failed build and `flutter clean`-ing to start over turns one slow build into two.
 >
-> 时限多长按项目定:热缓存增量构建几十秒,冷仓首次可能几十分钟。**600 只是起手值,跑过一次就知道这个项目该给多少**。
+> How long the limit should be is project-specific: a warm incremental build is tens of seconds, a cold first build tens of minutes. **600 is only a starting value — one run tells you what this project needs**.
 
-拿到的 URI 顺带就是 §验证分层④ 的入口(转 http 后一行 curl 取 widget 树/布局/错误),见 `references/vm-service.md`。
+The URI you get is also the entry point for §Verification layering ④ (convert to http, then one curl for the widget tree/layout/errors) — see `references/vm-service.md`.
 
-**三档热重载铁律**(启动必带 `--pid-file`,否则发不了信号,每改一行冷启浪费几十分钟):
+**Three-tier hot reload, the iron rule** (always launch with `--pid-file`, otherwise you can't send the signal and every one-line change costs a cold start of tens of minutes):
 
-| 改了什么 | 用哪档 |
+| What you changed | Which tier |
 |---|---|
-| UI/样式/方法体/普通逻辑 | **① 热重载** `kill -USR1 $(cat <PID_FILE>)`(注入新代码,保留状态) |
-| 字段初始化器 / `main()` / DI 注册 / 路由表 / **已实例化的 controller·单例的初始状态** / 全局变量 | **② 热重启** `kill -USR2`(清状态重跑 main,复用已编译产物,比冷启快) |
-| **codegen 的输入**:`.arb`/l10n 文案、freezed·json_serializable 注解、drift schema | **先跑生成器**(`gen-l10n` / `build_runner`)**再 ② USR2**——只发 USR1 会看到旧产物,极易误判成"改了没生效"而去瞎改代码 |
-| `android/`·`ios/` 原生 / `pubspec.yaml`(增删依赖·assets) / 含原生码的新插件 / engine·channel | **③ 冷启动**(停掉重 `flutter run`) |
+| UI/styling/method bodies/ordinary logic | **① hot reload** `kill -USR1 $(cat <PID_FILE>)` (injects new code, keeps state) |
+| Field initializers / `main()` / DI registration / route tables / **the initial state of already-instantiated controllers & singletons** / global variables | **② hot restart** `kill -USR2` (clears state and reruns main, reusing compiled artifacts — faster than a cold start) |
+| **Codegen inputs**: `.arb`/l10n strings, freezed & json_serializable annotations, drift schemas | **run the generator first** (`gen-l10n` / `build_runner`), **then ② USR2** — a bare USR1 shows you the stale generated output, which is easily misread as "my change didn't take" and sends you off editing working code |
+| `android/`·`ios/` native code / `pubspec.yaml` (adding/removing deps & assets) / a new plugin containing native code / engine·channels | **③ cold start** (stop it and `flutter run` again) |
 
-口诀:Dart 方法体→USR1;初始化/注册/main/路由→USR2;**codegen 输入→先生成再 USR2**;动原生/pubspec/插件→冷启动;**拿不准先 USR2**(仍比冷启快)。
+Mnemonic: Dart method body → USR1; initialization/registration/main/routes → USR2; **codegen inputs → generate first, then USR2**; native/pubspec/plugins → cold start; **when unsure, USR2 first** (still faster than a cold start).
 
-> **要回查重载成败,就换一条带回执的通道**:`kill -USR1` 发出去没有回执,只能回头 grep 输出猜。要确认"这次重载到底成没成"时走 `flutter run --machine` 的 `app.restart`——它**返回 `{"code":0,"message":"Reloaded N libraries"}`**,`code!=0` 直接就是断言。见 `references/vm-service.md` §2.4。日常随手重载仍用 signal 更省事。
+> **To re-check whether a reload succeeded, switch to a channel that answers back**: `kill -USR1` is fire-and-forget — it leaves you grepping output and guessing. When you must confirm "did this reload actually take", use `app.restart` over `flutter run --machine` — it **returns `{"code":0,"message":"Reloaded N libraries"}`**, and `code!=0` is the assertion itself. See `references/vm-service.md` §2.4. For casual day-to-day reloads, the signal is still less hassle.
 
 ---
 
-## 收尾清理(kill flutter run ≠ 关 App)+ 防串台
+## Teardown (kill flutter run ≠ closing the app) + anti cross-talk
 
-**防串台**:同设备可共存多个 App(applicationId/bundleId 不同、互不覆盖)。截图/点击前确认前台=目标包:`mobilecli apps foreground --device <id>`(或 Android `adb ... dumpsys activity activities | grep mResumedActivity`);读日志先认目标 App PID(所有 Flutter App 的 `I/flutter` 都进 logcat)。
+**Anti cross-talk**: several apps can co-exist on one device (different applicationId/bundleId, not overwriting each other). Before screenshotting/tapping, confirm the foreground is the target package: `mobilecli apps foreground --device <id>` (or Android `adb ... dumpsys activity activities | grep mResumedActivity`); before reading logs, identify the target app's PID (every Flutter app's `I/flutter` goes into logcat).
 
-**收尾两步 + 回查**(`kill flutter run` 只断宿主,设备 App 照跑):
+**Two teardown steps + re-check** (`kill flutter run` only severs the host; the app keeps running on the device):
 ```bash
-kill "$(cat <PID_FILE>)" 2>/dev/null                      # 1) 停 flutter run 宿主
-mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Android=am force-stop / iOS=simctl terminate,mobilecli 已抹平)
-# 3) 同设备别项目残留 App 也 terminate;回查前台确认不是残留 App
+kill "$(cat <PID_FILE>)" 2>/dev/null                      # 1) stop the flutter run host
+mobilecli apps terminate --device <id> <appId>            # 2) actually close the app (Android=am force-stop / iOS=simctl terminate; mobilecli abstracts it)
+# 3) terminate leftover apps from other projects on the same device too; re-check the foreground isn't a leftover app
 ```
-**宣布"测完/停好"前先回查真实状态**。测试中改过的**设备系统状态同样要复原 + 回查**——断过网必须验证网络已恢复(`svc wifi enable` 在部分机型会卡死,可靠恢复路径见 `references/android.md` §10)。
+**Before announcing "tested/stopped", re-check the real state.** **Device system state you changed during testing must be restored and re-checked too** — if you cut the network, you must verify it's back (`svc wifi enable` hangs on some models; the reliable recovery path is in `references/android.md` §10).
 
 ---
 
-## 平台细节、进阶与可移植性
+## Platform details, advanced topics & portability
 
-- **VM Service 内省** → `references/vm-service.md`(第三条路:widget 树带源码行号 / render 树真实尺寸 / 结构化错误 / evaluate 读状态 / 运行时切深色模式;HTTP 与 WS 的能力边界)
-- **iOS 对等** → `references/ios.md`(`xcrun simctl` 模拟器优先 / WebDriverAgent 真机 / go-ios / 设备信任·provisioning / 确定性开关 / 收尾 terminate)
-- **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/关动画等确定性开关/性能指标/断网测试与恢复,平台末选)
-- **离线测试层** → `references/offline-test-layer.md`(fixture 四策略 + widget test + golden 矩阵 + a11y guideline)
-- **工具选型** → `references/tool-decision-tree.md`(mobilecli/mobile-mcp/mobilewright/Patrol 何时用)
-- **受限网络/权限** → `references/restricted-network.md`(npm 被企业网关拦时的备用渠道、macOS 执行位与 quarantine、哪些卡点只能人给)
-- **规模化/无人值守** → `references/scaling.md`(信任阶梯、worktree/子代理/workflow 并行、/schedule·/loop)
-- **项目落地**:`templates/`(`.claude/settings.json` 权限白名单+format/analyze hook + `.claude/commands/{spec,verify,ship,debug,nightly}.md`)。一键装:`bash setup-project.sh <项目根>`,**只往 `.claude/` 里写,不动你的项目根**(见 README)。
+- **VM Service introspection** → `references/vm-service.md` (the third path: widget tree with source line numbers / render tree with real sizes / structured errors / evaluate for runtime state / toggling dark mode at runtime; the HTTP vs WS capability boundary)
+- **iOS parity** → `references/ios.md` (`xcrun simctl` simulators first / WebDriverAgent for physical devices / go-ios / device trust & provisioning / determinism switches / terminate on teardown)
+- **Android details** → `references/android.md` (adb paths/wm size/dumpsys/logcat/determinism switches like disabling animations/performance metrics/offline testing and recovery; the platform last resort)
+- **Offline test layer** → `references/offline-test-layer.md` (four fixture strategies + widget tests + golden matrix + a11y guidelines)
+- **Tool selection** → `references/tool-decision-tree.md` (when to use mobilecli/mobile-mcp/mobilewright/Patrol)
+- **Restricted network/permissions** → `references/restricted-network.md` (fallback channels when a corporate gateway blocks npm, macOS exec bit & quarantine, which blockers only a human can clear)
+- **Scaling/unattended** → `references/scaling.md` (the trust ladder, worktree/subagent/workflow parallelism, /schedule·/loop)
+- **Project rollout**: `templates/` (a `.claude/settings.json` permission allowlist + format/analyze hooks + `.claude/commands/{spec,verify,ship,debug,nightly}.md`). One-shot install: `bash setup-project.sh <project-root>` — it **only writes into `.claude/`, never your project root** (see README).
 
 ---
 
-## Rules — 硬原则核对表(一条不丢;机制在各自章节,这里只做核对)
+## Rules — hard-principle checklist (don't drop one; the mechanics live in their own sections, this is only for checking)
 
-**Always 永远要**
-1. 先环境自举;**绿区**的事自己做完接着干(§2)。
-2. 交互前先 `dump ui` 检视,按 Key/label 定位、取**面积最小**的匹配;`io swipe`/长按发完**回查**(§元素驱动交互)。
-3. 可交互/可断言控件双标 `Key` + `Semantics`;`dump ui` 列不出 = 回代码补,并用 `meetsGuideline` 让它以后自动被拦住(§代码契约)。
-4. **改了 UI 就必须上设备真跑一次并截图核验**——`flutter test` 全绿**不等于** UI 对(§验证分层「← 向上」);任务里出现「跑起来看看/效果怎么样/是不是错位」一律上设备,不许用"单测通过"结案。
-5. 纯逻辑 bug 用离线层秒级定位、静态视觉回归交给 golden——**目的是把设备时间留给真正要看 UI 的部分**。
-6. 验收标准先自展开成 3~8 条可断言条目并逐条标层;每条开跑前**复位到已知起点**;跑几端按改动性质定,单端绿如实写成单端绿,模拟器给不了的能力直接上真机(§自主开发完整循环)。
-7. 找不到控件 / 布局歪 / 疑似报错,**先查 VM Service**(widget 树带源码行号、render 树给真实 constraints),别一上来就截图肉眼找。
-8. 改代码走 `--pid-file` + `USR1`/`USR2`;改了 codegen 输入(`.arb`/freezed/drift)**先跑生成器再 USR2**;要**回查**重载成败走 `--machine` 的 `app.restart`。等构建给全「起来了/死了/超时」三个出口(§flutter run 后台化)。
-9. 收尾两步关 App 并**回查**前台;**不回查不报完成**。
-10. 断言失败=逻辑 bug,修实现不改测试;自修复 **≤5 轮**(第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告,继续下个任务)。
-11. 报告按**完成门槛**五项出齐,缺一项不算完成。
-12. 提交按用户提交策略执行(§1),不默认自动提交。
+**Always**
+1. Bootstrap the environment first; anything in the **green zone**, do it yourself and keep going (§2).
+2. `dump ui` to inspect before interacting; locate by Key/label and take the **smallest match by area**; **re-check** after every `io swipe` / long-press (§Element-driven interaction).
+3. Double-tag interactive/assertable widgets with `Key` + `Semantics`; if `dump ui` can't list it, go fix the code, and use `meetsGuideline` so it gets caught automatically from then on (§Code contract).
+4. **If you changed UI, you must run it on a device once and verify by screenshot** — `flutter test` all-green **does not mean** the UI is right (§Verification layering, "← Upward"); whenever the task says "run it and see / how does it look / is it misaligned", go to the device; never close it out with "the unit tests passed".
+5. Locate pure-logic bugs in the offline layer in seconds and leave static visual regression to goldens — **the point is to reserve device time for what genuinely needs looking at**.
+6. Self-expand the acceptance criteria into 3–8 assertable items and tag each with its layer; **reset to a known starting point** before each item; decide how many platforms by the nature of the change, write single-platform green up as single-platform green, and go straight to a real device for what a simulator can't give you (§The full autonomous loop).
+7. Can't find a widget / layout is skewed / suspect an error → **check the VM Service first** (widget tree with source line numbers, render tree with real constraints); don't start by eyeballing screenshots.
+8. Change code via `--pid-file` + `USR1`/`USR2`; if you changed a codegen input (`.arb`/freezed/drift), **run the generator before USR2**; to **re-check** a reload, use `app.restart` over `--machine`. Give a build wait all three exits — "it's up / it died / it's stuck" (§Backgrounding flutter run).
+9. Two teardown steps to close the app, then **re-check** the foreground; **no re-check, no completion claim**.
+10. An assertion failure is a logic bug: fix the implementation, don't change the test; self-repair **≤5 rounds** (round 3: record what you've tried; round 4: change approach; round 5: stop, emit a stuck report, move on).
+11. Emit all five items of the **completion bar**; missing one means not done.
+12. Commit per the user's commit policy (§1); never auto-commit by default.
 
-**Never — 四红线**(默认禁止,唯一解锁=用户事先明确授权并写明范围;详见 §2):① 设备物理掉线(自救一次仍败才停) ② 花真钱的操作 ③ 密钥/凭证操作 ④ 不可逆破坏 + 项目 `CLAUDE.md` 特有红线。未授权时:交互可问一句,无人值守跳过并标注「需授权」,不卡住等人。
+**Never — the four red lines** (deny by default; the only unlock is the user's explicit prior authorization with the scope written out; see §2): ① device physically disconnected (stop only after one self-recovery attempt fails) ② operations that spend real money ③ key/credential operations ④ irreversible destruction + project-specific red lines from the project `CLAUDE.md`. When not authorized: interactive may ask once; unattended, skip and mark "needs authorization" — don't block waiting for a human.
 
-**Never — 两条反模式**(其余失败形态都是上面 Always 的反面,正面读那一条即可):
-- **不回查就报结果**——设备侧命令失败时退出码常常是 0,「我执行了」离「它生效了」还差一次回查(最常见:拿 `io swipe` 的退出码 0 当滑动成功)。
-- **拿"离线测试全绿"当"UI 验过了"**——头号反模式:该上设备的没上,报告里没有一张截图。
+**Never — two anti-patterns** (every other failure mode is the inverse of an Always rule above; read the positive one instead):
+- **Reporting a result without re-checking it** — device-side commands routinely exit 0 on failure, so "I ran it" is still one re-check away from "it took effect" (most common: taking `io swipe`'s exit code 0 as a successful swipe).
+- **Passing "the offline tests are all green" off as "the UI is verified"** — the #1 anti-pattern: not going on-device when you should have, and a report with not a single screenshot.
 
-> 后者**最该防**:前者是效率与准确性问题,它是**没干活却报了完成**——本 skill 的价值就在那张截图和那次真跑上。
+> The second is **the one to guard hardest**: the first costs efficiency and accuracy, the second is **claiming completion without doing the work** — this skill's whole value is in that screenshot and that real run.

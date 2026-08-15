@@ -103,6 +103,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`npx skills add` found no skill at all.** The frontmatter `description:` was
+  an unquoted YAML scalar containing `": "` (in `Use for: running the app…`),
+  which YAML reads as a nested mapping — so the skills CLI skipped both
+  `SKILL.md` files with a parse error and reported "No valid skills found". That
+  is install channel A, the one the README lists first. Both descriptions are now
+  single-quoted. Claude Code's own loader was more forgiving and had always read
+  the file, which is why this went unnoticed: the channel that broke was the one
+  the maintainer never used.
+
 - **The build-wait loop could spin forever.** It waited on the vmservice file or
   a short list of grep patterns, so any failure outside that list (CocoaPods,
   signing, `No supported devices`) left it polling until the harness killed it —
@@ -133,6 +142,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     prints the areas so a wrong pick is visible before you tap.
 
 ### Changed
+
+- **English is now what ships; Chinese moved to `zh/`.** The layout had it
+  backwards for an open-source project: `skills/flutter-autonomous/SKILL.md` was
+  Chinese and the English mirror sat one directory down in `en/`, so the file
+  Claude loads on an English user's machine — and everything `references/` and
+  `templates/` install — was the translated copy, always the side at risk of
+  lagging. The two are swapped: the skill root is English, the Chinese copy is
+  `zh/`. Editing order is unchanged (Chinese first, then sync), only which side
+  ships. Two things fall out of the swap for free: `SKILL.md`'s relative links to
+  `scripts/` now resolve from the file that actually gets loaded, and
+  `tools/check-mirror.sh` guards the direction that matters.
+- **The three shipped shell scripts speak English.** `bootstrap.sh`,
+  `setup-project.sh` and `tap-by-label.sh` printed every diagnostic, hint and
+  summary row in Chinese — they are the first thing a new user sees after the
+  one-line install, and they were the loudest remaining Chinese surface. Comments
+  and output are translated; not one line of logic changed. Scripts stay
+  single-language by the existing convention (code is not mirrored), so there is
+  no `zh/` copy of them.
+- **`tools/check-mirror.sh` runs in the new direction, in English.** It now
+  pairs `zh/**` against the skill root rather than the root against `en/`, and
+  since the README tells PR authors to run it before opening a PR, its own output
+  is English too.
 
 - **"Re-check" is now a leading word, not eight phrasings of the same idea.** One
   concept — prove the result with an independent command instead of inferring it

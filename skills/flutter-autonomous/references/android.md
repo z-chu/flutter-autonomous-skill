@@ -1,132 +1,132 @@
-# Android 平台细节（adb 是平台后端）
+# Android Platform Details (adb is the platform backend)
 
-> 先读 keystone `SKILL.md`：交互底座统一 `mobilecli`，**有 `Semantics` 时一律走元素驱动**（`dump ui`→点 rect 中心），**adb 盲点是末选**——只有纯 canvas 无 Semantics 才回退量坐标。本文只写 Android 平台后端（adb）的深度细节，不复述方法论。
+> Read the keystone `SKILL.md` first: the interaction base is unified on `mobilecli`, and **whenever `Semantics` is present always go element-driven** (`dump ui` → tap rect center); **adb blind-tap is the last resort** — only fall back to measuring coordinates for pure canvas with no Semantics. This doc only covers the deep details of the Android platform backend (adb); it does not restate the methodology.
 >
-> 一句话定位：**Android 大多功能裸 `adb` 即可**（设备发现、前台核验、日志、收尾、像素）；`mobilecli` 在 Android 上正是用 `adb` 路径做发现与点击，**只有非 ASCII 输入才需要装 on-device agent**。占位符：`<id>`=设备序列号、`<applicationId>`=被测 App 包名（从项目 `CLAUDE.md` 或 `android/app/build.gradle(.kts)` 的 `applicationId` 读，绝不写死）。
+> One-line positioning: **most Android features work with bare `adb`** (device discovery, foreground verification, logs, teardown, pixels); on Android `mobilecli` uses the `adb` path for discovery and tapping, and **only non-ASCII input requires installing an on-device agent**. Placeholders: `<id>` = device serial, `<applicationId>` = the package name of the App under test (read from the project `CLAUDE.md` or the `applicationId` in `android/app/build.gradle(.kts)`, never hardcode it).
 
 ---
 
-## 1. adb 路径检测（找到可用的 adb 再往下）
+## 1. adb Path Detection (find a usable adb before proceeding)
 
-按优先级探测，第一个命中就用，**绝不写死绝对路径**：
+Probe by priority, use the first hit, and **never hardcode an absolute path**:
 
 ```bash
-# 优先级：环境变量 > mac 默认 SDK > Linux 默认 SDK > 兜底裸 adb（在 PATH 里）
+# Priority: env var > mac default SDK > Linux default SDK > fallback bare adb (on PATH)
 adb_bin() {
   if [ -n "$ANDROID_HOME" ] && [ -x "$ANDROID_HOME/platform-tools/adb" ]; then
     echo "$ANDROID_HOME/platform-tools/adb"
   elif [ -n "$ANDROID_SDK_ROOT" ] && [ -x "$ANDROID_SDK_ROOT/platform-tools/adb" ]; then
     echo "$ANDROID_SDK_ROOT/platform-tools/adb"
-  elif [ -x "$HOME/Library/Android/sdk/platform-tools/adb" ]; then   # mac 默认 SDK 位置
+  elif [ -x "$HOME/Library/Android/sdk/platform-tools/adb" ]; then   # mac default SDK location
     echo "$HOME/Library/Android/sdk/platform-tools/adb"
-  elif [ -x "$HOME/Android/Sdk/platform-tools/adb" ]; then           # Linux 默认 SDK 位置
+  elif [ -x "$HOME/Android/Sdk/platform-tools/adb" ]; then           # Linux default SDK location
     echo "$HOME/Android/Sdk/platform-tools/adb"
   else
-    command -v adb || { echo "adb 未找到，装 platform-tools 或设 ANDROID_HOME" >&2; return 1; }
+    command -v adb || { echo "adb not found; install platform-tools or set ANDROID_HOME" >&2; return 1; }
   fi
 }
 ADB="$(adb_bin)"
 ```
 
-- 两个环境变量都试：新工程多用 `ANDROID_HOME`，老工程可能只有 `ANDROID_SDK_ROOT`。
-- 兜底裸 `adb`：用户可能用 Homebrew / 包管理器装的 platform-tools，已在 PATH。
-- 真找不到属于**绿区**（keystone §2）——自己装 platform-tools 后回验 `"$ADB" --version`，别停下要人工。
+- Try both env vars: newer projects mostly use `ANDROID_HOME`, older ones may only have `ANDROID_SDK_ROOT`.
+- Fallback bare `adb`: the user may have installed platform-tools via Homebrew / a package manager, already on PATH.
+- If you truly can't find it, this is **green zone** (keystone §2) — install platform-tools yourself, then re-verify with `"$ADB" --version`; don't stop and ask for manual help.
 
 ---
 
-## 2. 设备发现与一次性自救
+## 2. Device Discovery and One-Shot Self-Recovery
 
 ```bash
-"$ADB" devices            # 列出在线设备；每行 "<id>\tdevice" 才算就绪
+"$ADB" devices            # list online devices; only a line "<id>\tdevice" counts as ready
 ```
 
-判定与自救（**只自救一次**，对齐 keystone「物理掉线才停」红线）：
+Decision and self-recovery (**recover only once**, aligned with the keystone red line "stop only on physical disconnect"):
 
-- 列表里有 `<id>\tdevice` → 就绪，往下走。
-- **空 / 只有 header / 状态是 `offline` 或 `unauthorized`** → `"$ADB" kill-server && "$ADB" start-server` 自救一次，重列。
-- 自救后仍空 = **物理掉线/没插/没授权调试**，这才是 keystone 红线①「设备物理掉线」，停下出卡住报告。
-- `unauthorized`：设备上有「允许 USB 调试」弹窗没点 → 属物理侧人工，提示用户在设备上确认，别死等。
-- 多设备并存：所有 adb 命令都带 `-s <id>` 锁定，`<id>` 运行期从 `"$ADB" devices` 现取，**绝不写进任何文件**。
+- A `<id>\tdevice` in the list → ready, proceed.
+- **Empty / header only / status is `offline` or `unauthorized`** → self-recover once with `"$ADB" kill-server && "$ADB" start-server`, then re-list.
+- Still empty after recovery = **physically disconnected / not plugged in / debugging not authorized**; this is keystone red line #1 "device physically disconnected" — stop and report being stuck.
+- `unauthorized`: there's an unclicked "Allow USB debugging" prompt on the device → this is physical-side manual work; prompt the user to confirm on the device, don't wait forever.
+- Multiple devices coexisting: have all adb commands carry `-s <id>` to lock the target; fetch `<id>` at runtime from `"$ADB" devices`, and **never write it into any file**.
 
-> mobilecli 同样能列设备（`mobilecli devices`，输出 JSON 便于 `jq` 取 id），底层就是这条 adb 路径；二选一即可，脚本里取 id 用 mobilecli 的 JSON 更省解析。
+> mobilecli can also list devices (`mobilecli devices`, output is JSON for easy `jq` extraction of the id); underneath it's the same adb path. Pick either; in scripts, extracting the id from mobilecli's JSON saves parsing.
 
 ---
 
-## 3. 防串台：确认前台 = 被测 App
+## 3. Cross-talk Prevention: Confirm Foreground = App Under Test
 
-同一设备可共存多个 Flutter App（`applicationId` 不同、互不覆盖），截图/点击/读日志前**必须确认前台是目标包**，否则在别的 App 上点来点去还以为在测自己。
+The same device can host multiple Flutter Apps (different `applicationId`, not overwriting each other). Before screenshot / tap / reading logs you **must confirm the foreground is the target package**, otherwise you'll be tapping around in another App while thinking you're testing your own.
 
 ```bash
-# 前台 Activity 所属包：输出里必须含目标 <applicationId>
+# Package owning the foreground Activity: output must contain the target <applicationId>
 "$ADB" -s <id> shell dumpsys activity activities | grep mResumedActivity
-# 典型输出： mResumedActivity: ActivityRecord{... <applicationId>/.MainActivity ...}
+# Typical output: mResumedActivity: ActivityRecord{... <applicationId>/.MainActivity ...}
 ```
 
-- 不含目标包 = 串台了 → 先 `mobilecli apps foreground --device <id>` 或重新拉起目标 App，再继续。
-- mobilecli 等价物：`mobilecli apps foreground --device <id>` 直接返回前台包名，比 grep dumpsys 更干净，优先用它。
+- Doesn't contain the target package = cross-talk → first run `mobilecli apps foreground --device <id>` or relaunch the target App, then continue.
+- mobilecli equivalent: `mobilecli apps foreground --device <id>` returns the foreground package name directly, cleaner than grepping dumpsys — prefer it.
 
-**读日志先认目标 App 的 PID**——同设备所有 Flutter App 的 `I/flutter` 都进同一条 logcat，不按 PID 过滤会把别的 App 的日志当成自己的：
+**Before reading logs, identify the target App's PID** — all Flutter Apps on the device send their `I/flutter` into the same logcat, and without filtering by PID you'll mistake another App's logs for your own:
 
 ```bash
-PID="$("$ADB" -s <id> shell pidof <applicationId>)"   # 空=App 没在跑
-"$ADB" -s <id> logcat --pid="$PID"                    # 只看目标 App 的全部进程日志
+PID="$("$ADB" -s <id> shell pidof <applicationId>)"   # empty = App not running
+"$ADB" -s <id> logcat --pid="$PID"                    # see only all-process logs of the target App
 ```
 
 ---
 
-## 4. 日志：抓连接 / 状态机 / 布局溢出（最硬的取证）
+## 4. Logs: Capture Connections / State Machine / Layout Overflow (the hardest evidence)
 
-Flutter 的 `print`/`debugPrint` 走 `I/flutter` tag：
+Flutter's `print`/`debugPrint` goes through the `I/flutter` tag:
 
 ```bash
-"$ADB" -s <id> logcat -s flutter            # 只看 Flutter 输出
-"$ADB" -s <id> logcat -c                    # 跑用例前清旧日志，避免读到上轮残留
+"$ADB" -s <id> logcat -s flutter            # see only Flutter output
+"$ADB" -s <id> logcat -c                    # clear old logs before running a case, to avoid reading leftovers from the prior round
 ```
 
-按 keystone「验证分层·⑦日志取证」grep 关键锚点（具体锚点串从项目 `CLAUDE.md` 读，下面是通用形态）：
+Per the keystone "verification four layers · layer 4 evidence", grep key anchors (read the specific anchor strings from the project `CLAUDE.md`; below are generic shapes):
 
 ```bash
-# 连接类：WS/HTTP 连上的 URL、握手成功标志
+# Connection class: the URL of a connected WS/HTTP, handshake-success markers
 "$ADB" -s <id> logcat -s flutter | grep -iE "ws://|wss://|connected|handshake"
-# 状态机：状态名流转（确认走到了预期状态，比截图可靠）
+# State machine: state-name transitions (confirms it reached the expected state, more reliable than a screenshot)
 "$ADB" -s <id> logcat -s flutter | grep -iE "state|status"
-# 布局溢出：带文件:行号，直接定位到出问题的 widget
+# Layout overflow: carries file:line, directly pinpoints the offending widget
 "$ADB" -s <id> logcat -s flutter | grep -iE "RenderFlex overflowed|overflowed by .* pixels"
 ```
 
-- 长驻看日志另起后台 Bash 轮询，别阻塞主线程（参考 keystone 的 `until grep` 模式）。
-- 连接/状态/gating 这类「发生了没发生」的判断**用日志，不用截图**——截图只证视觉/布局。
+- For long-running log watching, start a separate background Bash poll; don't block the main thread (see the keystone `until grep` pattern).
+- For "did it happen or not" judgments like connection/state/gating, **use logs, not screenshots** — screenshots only prove visuals/layout.
 
 ---
 
-## 4.1 用「日志窗口」做断言（比全量 grep 硬）
+## 4.1 Assert against a "log window" (harder than grepping everything)
 
-全量 `logcat | grep` 的问题是分不清「这条日志是这一步产生的，还是上一步残留的」。**把日志切成以动作为单位的窗口**，断言才成立：
+The problem with grepping the whole `logcat` is that you can't tell whether a line came from *this* step or is left over from the previous one. **Slice the log into windows, one per action** — only then does the assertion hold:
 
 ```bash
-"$ADB" -s <id> logcat -c                                   # 1) 清缓冲，划定窗口起点
-mobilecli io tap --device <id> <cx>,<cy>                   # 2) 执行【一个】动作
+"$ADB" -s <id> logcat -c                                   # 1) clear the buffer: this marks the window start
+mobilecli io tap --device <id> <cx>,<cy>                   # 2) perform 【one】 action
 sleep 1
-"$ADB" -s <id> logcat -d --pid="$PID" -s flutter > win.log # 3) 只取这一步的日志
-grep -qE "<预期锚点>" win.log && echo PASS || echo FAIL     # 4) 对着窗口断言
+"$ADB" -s <id> logcat -d --pid="$PID" -s flutter > win.log # 3) take only this step's log
+grep -qE "<expected anchor>" win.log && echo PASS || echo FAIL   # 4) assert against the window
 ```
 
-- `-d` 是 dump 后退出（不是长驻），配合 `-c` 才能得到干净窗口。
-- `--pid="$PID"` 防串台（§3），两者一起用。
-- **App 侧配合打机器可读锚点**，断言就不用写正则去猜人类可读文本：
+- `-d` dumps and exits (not long-running); combined with `-c` it gives you a clean window.
+- `--pid="$PID"` prevents cross-talk (§3); use them together.
+- **Have the app emit machine-readable anchors**, so assertions don't have to regex human-readable text:
 
   ```dart
   dev.log('{"evt":"order_submitted","id":"$id"}', name: 'e2e');   // dart:developer
   ```
 
-  断言侧 `grep -o '{.*}' win.log | jq -e 'select(.evt=="order_submitted")'`。锚点串本身放项目 `CLAUDE.md`。
-- **更硬的错误断言**见 `vm-service.md` §4：`errorsSinceReload` 一次覆盖所有错误类型，不用为每种错误写一条 grep。
+  On the assertion side: `grep -o '{.*}' win.log | jq -e 'select(.evt=="order_submitted")'`. The anchor strings themselves belong in the project `CLAUDE.md`.
+- **A harder error assertion** is in `vm-service.md` §4: `errorsSinceReload` covers every error type at once, so you don't write one grep per error kind.
 
 ---
 
-## 4.2 确定性开关：先关动画，再截图/点击
+## 4.2 Determinism switches: kill animations before screenshotting/tapping
 
-动画在跑时截图和点击都会飘，这是设备层 flake 的头号来源。**跑用例前关掉系统动画**（可逆，属绿区）：
+Screenshots and taps both drift while animations are running — the number-one source of device-layer flake. **Turn off system animations before running cases** (reversible, green zone):
 
 ```bash
 for k in window_animation_scale transition_animation_scale animator_duration_scale; do
@@ -134,144 +134,144 @@ for k in window_animation_scale transition_animation_scale animator_duration_sca
 done
 ```
 
-**收尾必须还原并回查**（与 §10 断网同级——把用户设备留在「没有动画」的状态是收尾事故）：
+**You must restore and re-check at teardown** (same severity as the §10 network cut — leaving the user's device with no animations is a teardown incident):
 
 ```bash
 "$ADB" -s <id> shell settings put global window_animation_scale 1.0
 "$ADB" -s <id> shell settings put global transition_animation_scale 1.0
-"$ADB" -s <id> shell settings delete global animator_duration_scale   # 该项默认可能是未设置
-"$ADB" -s <id> shell settings get global window_animation_scale       # 回查：确认已还原
+"$ADB" -s <id> shell settings delete global animator_duration_scale   # this one may be unset by default
+"$ADB" -s <id> shell settings get global window_animation_scale       # re-check: confirm it's restored
 ```
 
-> **改设置前先读原值再改**，还原时写回读到的那个值，别假设默认是 1.0。实测有机型 `animator_duration_scale` 原本就是未设置（`null`），这种要用 `settings delete` 而不是写 1.0。
+> **Read the original value before changing a setting**, and write that value back on restore — don't assume the default is 1.0. Measured: on some models `animator_duration_scale` is unset (`null`) to begin with, and those need `settings delete` rather than writing 1.0.
 
-其它可控的确定性 / 场景开关（同样用完还原 + 回查）：
+Other controllable determinism / scenario switches (also restore + re-check when done):
 
 ```bash
-"$ADB" -s <id> shell settings put system font_scale 1.3           # 大字号下的布局核验
-"$ADB" -s <id> shell cmd uimode night yes|no                      # 系统级深色模式
-"$ADB" -s <id> shell pm grant|revoke <applicationId> <permission> # 权限流程的确定性前置
+"$ADB" -s <id> shell settings put system font_scale 1.3           # layout verification at large font scale
+"$ADB" -s <id> shell cmd uimode night yes|no                      # system-level dark mode
+"$ADB" -s <id> shell pm grant|revoke <applicationId> <permission> # deterministic setup for permission flows
 ```
 
-> 深色模式核验优先用 `vm-service.md` §3.5 的 `brightnessOverride`——**不改系统设置、不用还原**，比 `cmd uimode` 干净。
+> For dark-mode verification, prefer `brightnessOverride` from `vm-service.md` §3.5 — **no system setting changed, nothing to restore** — cleaner than `cmd uimode`.
 
 ---
 
-## 4.3 量化指标：启动耗时与掉帧（可断言的数字）
+## 4.3 Quantified metrics: startup time and jank (assertable numbers)
 
-视觉和交互之外还有一个维度：**性能可以是验收标准的一部分**，而且是数字，不需要人来判断。
+Beyond visuals and interaction there's one more dimension: **performance can be part of the acceptance criteria**, and it's numeric — no human judgment needed.
 
 ```bash
-# 冷启动耗时：force-stop 后测，TotalTime 就是可断言的毫秒数
+# Cold-start time: measure after a force-stop; TotalTime is the assertable millisecond figure
 "$ADB" -s <id> shell am force-stop <applicationId>
 "$ADB" -s <id> shell am start -W -n <applicationId>/.MainActivity | grep -E "TotalTime|LaunchState"
 # → LaunchState: COLD / TotalTime: 1725
 
-# 掉帧：跑完一段交互后读，给出 janky 比例与分位数
-"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> reset      # 先归零
-# …执行要测的那段交互…
+# Jank: read after running an interaction; gives the janky ratio and percentiles
+"$ADB" -s <id> shell dumpsys gfxinfo <applicationId> reset      # zero it first
+# …perform the interaction under test…
 "$ADB" -s <id> shell dumpsys gfxinfo <applicationId> \
   | grep -E "Total frames|Janky frames|90th|95th|99th"
 # → Janky frames: 1 (33.33%) / 90th percentile: 109ms
 ```
 
-- `dumpsys gfxinfo` 的统计是**累积的**，不先 `reset` 读到的是开机以来的混合数据，断言无意义。
-- 用法：把「首屏 TotalTime < X ms」「janky 比例 < Y%」写进验收标准，自主循环就能自己判过没过——比「感觉有点卡」可执行得多。阈值是项目特定值，放项目 `CLAUDE.md`。
-- 更深的时间线用 `flutter run --profile --trace-to-file=<path>`（Perfetto proto 格式）。
+- `dumpsys gfxinfo` statistics are **cumulative**; without a `reset` first you're reading a mix going back to boot, and the assertion is meaningless.
+- How to use it: write "first-screen TotalTime < X ms" and "janky ratio < Y%" into the acceptance criteria, and the autonomous loop can judge pass/fail on its own — far more actionable than "feels a bit laggy". Thresholds are project-specific: put them in the project `CLAUDE.md`.
+- For a deeper timeline, use `flutter run --profile --trace-to-file=<path>` (Perfetto proto format).
 
 ---
 
-## 5. 收尾：force-stop ≠ kill flutter run（必须回查）
+## 5. Teardown: force-stop ≠ kill flutter run (must re-check)
 
-`kill flutter run` 只断了宿主进程，设备上的 App 照常在跑（keystone 硬原则）。真关 App：
+`kill flutter run` only severs the host process; the App on the device keeps running (keystone hard principle). To really close the App:
 
 ```bash
 "$ADB" -s <id> shell am force-stop <applicationId>   # = mobilecli apps terminate --device <id> <applicationId>
-"$ADB" -s <id> shell pidof <applicationId>           # 回查：输出为空 = 真关掉了
+"$ADB" -s <id> shell pidof <applicationId>           # re-check: empty output = really closed
 ```
 
-- `am force-stop` 与 `mobilecli apps terminate` 等价，mobilecli 已抹平平台差异，二选一。
-- **回查铁律**：跑完 `force-stop` 后必须 `pidof` 确认为空，别拿「我执行了 force-stop」当「App 关了」（keystone「不验证不报完成」）。
-- 同设备别的项目残留 App 也一并 `force-stop` + 回查前台，确认收尾后前台不是残留 App。
+- `am force-stop` and `mobilecli apps terminate` are equivalent; mobilecli has smoothed over platform differences, pick either.
+- **Re-check iron rule**: after running `force-stop` you must confirm `pidof` is empty; don't treat "I ran force-stop" as "the App is closed" (keystone "don't verify, don't report done").
+- Also `force-stop` any leftover Apps from other projects on the same device + re-check the foreground, confirming that after teardown the foreground isn't a leftover App.
 
 ---
 
-## 6. 物理像素（仅纯 canvas 无 Semantics 才用）
+## 6. Physical Pixels (only for pure canvas with no Semantics)
 
-**有 Semantics 时不需要这一节**——`dump ui` 直接给设备像素 rect，取中心即点，无换算。只有纯 canvas 绘制（图表内部、无 Semantics 包裹的元素）两条路都找不到，才回退「截图肉眼量坐标 × 缩放比」。
+**This section isn't needed when Semantics is present** — `dump ui` directly gives device-pixel rects; take the center and tap, no conversion. Only when both paths fail for pure-canvas drawing (inside charts, elements not wrapped in Semantics) do you fall back to "eyeball-measure coordinates on a screenshot × scale ratio".
 
 ```bash
-"$ADB" -s <id> shell wm size      # 例：Physical size: <W>x<H> —— 设备真实像素，不是 dp
+"$ADB" -s <id> shell wm size      # e.g. Physical size: <W>x<H> — the device's real pixels, not dp
 ```
 
-通用缩放公式（**不写具体数字**，运行期现算）：
+Generic scale formula (**don't write specific numbers**, compute at runtime):
 
 ```
-缩放比 = 物理宽(wm size 的 W) / 截图宽(你 Read 的那张图的实际像素宽)
-点击坐标(设备像素) = 你在截图上量到的坐标 × 缩放比
+scale ratio = physical width (W from wm size) / screenshot width (the actual pixel width of the image you Read)
+tap coordinate (device pixels) = the coordinate you measured on the screenshot × scale ratio
 ```
 
-- 为什么要换算：`exec-out screencap` 出的图有时已是物理像素（缩放比=1），但经工具二次缩放/不同 DPI 截图工具后宽度会变，**必须用你手里这张图的实际宽去算**，别假设 1:1。
-- 横向量到的 x 用「物理宽/截图宽」，纵向量到的 y 用「物理高/截图高」，等比时两者相同；保险起见分别算。
-- 这是末选中的末选：能补 `Semantics(label:)` 让控件 dump 得出，就回代码补（keystone「列不出=代码缺陷修」），别长期靠量坐标。
+- Why convert: the image from `exec-out screencap` is sometimes already physical pixels (scale ratio = 1), but after a tool re-scales it / a different-DPI screenshot tool, the width changes; **you must compute with the actual width of the image you have in hand**, don't assume 1:1.
+- For a horizontally-measured x use "physical width / screenshot width", for a vertically-measured y use "physical height / screenshot height"; they're identical when scaled equally; to be safe compute each separately.
+- This is the last resort of last resorts: if you can add `Semantics(label:)` to make the widget dump-able, go back to the code and add it (keystone "can't be listed = code defect, fix it"); don't rely on measuring coordinates long term.
 
 ---
 
-## 7. 盲点末选命令（有 Semantics 一律走 mobilecli 元素驱动）
+## 7. Blind-Tap Last-Resort Commands (with Semantics, always go mobilecli element-driven)
 
-下面这些是**平台末选**，仅在纯 canvas、确实拿不到 Semantics rect 时用。优先级永远是 `mobilecli dump ui`→`io tap`（语义坐标）> 这些盲点 adb。
+The following are the **platform last resort**, used only for pure canvas where you truly can't get a Semantics rect. The priority is always `mobilecli dump ui` → `io tap` (semantic coordinates) > these blind-tap adb commands.
 
 ```bash
-"$ADB" -s <id> shell input tap <x> <y>                  # 盲点（坐标须经 §6 换算）
-"$ADB" -s <id> shell input swipe <x1> <y1> <x2> <y2> [<ms>]  # 滑动/滚动/下拉刷新
-"$ADB" -s <id> shell input text "<ASCII文本>"           # 仅 ASCII；中文/emoji 喂不进（见 §8）
-"$ADB" -s <id> shell input keyevent 4                   # 4 = BACK 返回
-"$ADB" -s <id> exec-out screencap -p > shot.png         # 截图（exec-out 走二进制管道，不损坏 PNG）
+"$ADB" -s <id> shell input tap <x> <y>                  # blind-tap (coords must go through §6 conversion)
+"$ADB" -s <id> shell input swipe <x1> <y1> <x2> <y2> [<ms>]  # swipe/scroll/pull-to-refresh
+"$ADB" -s <id> shell input text "<ASCII text>"          # ASCII only; Chinese/emoji can't be fed in (see §8)
+"$ADB" -s <id> shell input keyevent 4                   # 4 = BACK
+"$ADB" -s <id> exec-out screencap -p > shot.png         # screenshot (exec-out uses a binary pipe, doesn't corrupt the PNG)
 ```
 
-- 截图务必用 `exec-out`（不是 `shell`），`shell screencap` 在某些机型会把 `\n` 转成 `\r\n` 损坏 PNG。
-- `keyevent 4` 是 Android 专属的 BACK；mobilecli 的 `io button BACK` 已封装它，跨平台脚本用 mobilecli 那条（iOS 无 BACK）。
-- `input text` 只能 ASCII，遇空格要转义或用 `%s`；非 ASCII 走 §8。
-- 截图后必须 `Read` 那张图肉眼核验，别拿「截了图」当「看过了」。
+- Always use `exec-out` for screenshots (not `shell`); `shell screencap` on some devices converts `\n` to `\r\n` and corrupts the PNG.
+- `keyevent 4` is Android-specific BACK; mobilecli's `io button BACK` wraps it, so cross-platform scripts should use the mobilecli one (iOS has no BACK).
+- `input text` is ASCII only; escape spaces or use `%s`; non-ASCII goes through §8.
+- After a screenshot you must `Read` that image and eyeball-verify it; don't treat "took a screenshot" as "looked at it".
 
 ---
 
-## 8. mobilecli 在 Android 上的输入边界（非 ASCII 才需 agent）
+## 8. mobilecli's Input Boundary on Android (only non-ASCII needs an agent)
 
-- mobilecli 的 `io tap` / `io swipe` / `dump ui` / `screenshot` 在 Android 上都走 adb 路径，**零额外安装**。
-- `io text` 输入**非 ASCII（中文/emoji）**时，adb `input text` 喂不进 → mobilecli 需要在设备上装一个 on-device input agent（IME）才能输。属「补工具」可逆操作：按 mobilecli 文档装好 agent 再继续，别停下要人工。
-- 纯英文/数字输入裸 adb `input text` 就够，无需 agent。
-- 注意区分：Flutter **自绘数字键盘 / 自定义手势控件**根本不是系统输入框，`io text` 和 adb `input text` 都喂不进 → 只能逐个 `io tap` 键的 rect 中心（keystone 已述）。
-
----
-
-## 9. 工具链版本（项目特定，不放本文）
-
-JDK / Gradle / Android SDK 版本是**项目特定**的，因机器/工程而异 → 放项目 `CLAUDE.md`，本文不写死。
-
-- 仅提一句排错锚点：`flutter run` / Gradle 构建报 `compileDebugJavaWithJavac` 失败，**最常见是 JDK 版本与工程要求不匹配**（Gradle 用了系统默认 JDK 而非工程要求的版本）。具体该用哪个 JDK、怎么指定（`org.gradle.java.home` / `JAVA_HOME`）从项目 `CLAUDE.md` 读。
-- 工具链报错属构建环境问题，按项目 `CLAUDE.md` 指定的版本修好再重跑，仍属**绿区**自己处理。
+- mobilecli's `io tap` / `io swipe` / `dump ui` / `screenshot` all go through the adb path on Android, **zero extra install**.
+- When `io text` inputs **non-ASCII (Chinese/emoji)**, adb `input text` can't feed it → mobilecli needs an on-device input agent (IME) installed on the device to type it. This is a reversible "provisioning tools" operation: install the agent per the mobilecli docs and continue, don't stop and ask for manual help.
+- Pure English/numeric input is handled by bare adb `input text`, no agent needed.
+- Note the distinction: a Flutter **self-drawn numeric keypad / custom gesture control** isn't a system input field at all — neither `io text` nor adb `input text` can feed it → you can only `io tap` each key's rect center one by one (already stated in the keystone).
 
 ---
 
-## 10. 断网/弱网测试（网络是系统状态：测完必须复原 + 回查）
+## 9. Toolchain Versions (project-specific, not in this doc)
 
-验证离线降级 / 错误态 / 重连逻辑时，用 `svc` 切设备网络——**USB adb 不受影响**，断网期间元素驱动 / 截图 / 日志照常：
+JDK / Gradle / Android SDK versions are **project-specific**, varying by machine/project → put them in the project `CLAUDE.md`; this doc doesn't hardcode them.
+
+- Just one troubleshooting anchor: when `flutter run` / a Gradle build reports `compileDebugJavaWithJavac` failure, **the most common cause is a JDK version mismatch with the project's requirement** (Gradle used the system default JDK instead of the version the project requires). Read which JDK to use and how to specify it (`org.gradle.java.home` / `JAVA_HOME`) from the project `CLAUDE.md`.
+- A toolchain error is a build-environment issue; fix it to the version specified in the project `CLAUDE.md` and re-run; this is still **green zone** and you handle it yourself.
+
+---
+
+## 10. Network-Cut / Offline Testing (network is system state: restore + re-check when done)
+
+To verify offline degradation / error states / reconnect logic, cut the device's network with `svc` — **USB adb is unaffected**, so element-driven interaction / screenshots / logs all keep working while offline:
 
 ```bash
-"$ADB" -s <id> shell "svc wifi disable; svc data disable"          # 断网
-"$ADB" -s <id> shell "dumpsys connectivity | grep 'Active default'" # 回查：none = 已断
+"$ADB" -s <id> shell "svc wifi disable; svc data disable"          # cut network
+"$ADB" -s <id> shell "dumpsys connectivity | grep 'Active default'" # re-check: none = cut
 ```
 
-**恢复的坑：`svc wifi enable` 可能拉不起来**（三星真机实测踩到）：`settings get global wifi_on` 已是 1、`cmd wifi status` 却仍报 "Wifi is disabled"，反复 `svc` / `cmd wifi set-wifi-enabled` 循环都无效。**可靠恢复路径是 Settings UI**——Settings 是原生页、控件天生有无障碍标签，元素驱动一次到位：
+**Recovery pitfall: `svc wifi enable` may fail to bring Wi-Fi back up** (hit on a real Samsung device): `settings get global wifi_on` already reads 1 while `cmd wifi status` still reports "Wifi is disabled", and looping `svc` / `cmd wifi set-wifi-enabled` gets you nowhere. **The reliable recovery path is the Settings UI** — Settings is a native page whose controls have accessibility labels by nature, so element-driven gets it in one step:
 
 ```bash
-"$ADB" -s <id> shell am start -a android.settings.WIFI_SETTINGS   # 打开 WLAN 设置页
-mobilecli dump ui --device <id>                                    # 找 Wi-Fi 开关（label 如「切换」/「Off」）
-mobilecli io tap --device <id> <开关rect中心>                       # 拨开关；~10s 内应关联上保存过的 AP
+"$ADB" -s <id> shell am start -a android.settings.WIFI_SETTINGS   # open the WLAN settings page
+mobilecli dump ui --device <id>                                    # find the Wi-Fi toggle (label like "Toggle"/"Off")
+mobilecli io tap --device <id> <toggle-rect-center>                # flip it; should associate to a saved AP within ~10s
 ```
 
-- **收尾铁律的网络版**：断过网就把「网络已恢复」纳入收尾回查——独立命令证明（`ping -c 1 8.8.8.8` 通、或 `dumpsys connectivity` 出现 Active default network），别拿「我执行了 enable」当「网络恢复了」。**把用户设备留在断网状态是收尾事故**，等级不低于没关 App。
-- **`adb shell` 里的网络 ≠ App 的网络**：`adb shell curl/ping` 走的是设备**裸网络栈**，**绕开手机上 VPN/代理 App 建立的 TUN**。所以拿它判断「App 能不能连上某域名」，结论可以和 App 里看到的完全相反——设备挂着代理时，`adb shell` 里连不通、App 里通得好好的（反之亦然）。**判连通性以 App 自身的证据为准**：日志里的请求结果、VM Service 取到的状态；`adb shell` 只用来验证**物理链路**（有没有 Active default network）。判反一次的代价是去修一个根本不存在的网络 bug，或者把正常的网络报成「被限制」。
-- 无 SIM 的测试机 Wi-Fi 是唯一通路（`getprop gsm.sim.state` 查），恢复失败没有移动数据兜底——更要回查到 ping 通为止。
-- 测试设计提示：断网后**已加载进内存的数据不会消失**，要触发「空数据 + 加载失败」态通常得切到未加载过的资源（新 symbol / 新页面）再观察；离线冷启动则可能被更上游的错误墙挡住到不了目标页——切资源比冷启动更可控。
+- **The teardown iron rule, network edition**: if you cut the network, "network restored" becomes part of teardown re-check — prove it with an independent command (`ping -c 1 8.8.8.8` succeeds, or `dumpsys connectivity` shows an Active default network); don't treat "I ran enable" as "network is back". **Leaving the user's device offline is a teardown incident**, no less serious than leaving the app running.
+- **The network inside `adb shell` ≠ the app's network**: `adb shell curl/ping` goes through the device's **raw network stack**, **bypassing the TUN set up by any VPN/proxy app on the phone**. So using it to decide "can the app reach this domain" can give you the exact opposite of what the app sees — with a proxy running, `adb shell` can't connect while the app is perfectly fine (and vice versa). **Judge reachability from the app's own evidence**: request outcomes in the logs, state read via the VM Service; use `adb shell` only to verify the **physical link** (is there an Active default network). Get this backwards once and you'll go fix a network bug that doesn't exist, or report a healthy network as "restricted".
+- On a SIM-less test device Wi-Fi is the only path (check `getprop gsm.sim.state`) — there is no mobile-data fallback if recovery fails, so re-check until ping succeeds.
+- Test-design tip: data already loaded in memory **does not disappear** when you cut the network; to trigger an "empty data + load failure" state you usually need to switch to a not-yet-loaded resource (new symbol / new page) and observe. A cold start while offline may be blocked by an upstream error wall before you ever reach the target page — switching resources is more controllable than cold-starting.

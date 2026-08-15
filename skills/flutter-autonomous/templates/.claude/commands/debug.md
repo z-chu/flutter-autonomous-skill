@@ -1,72 +1,72 @@
 ---
-description: 分析 crash / 测试失败，并行收证→按类型定位根因→修实现→验证→输出根因报告
+description: Analyze a crash / test failure, gather evidence in parallel → locate root cause by type → fix the implementation → verify → output a root-cause report
 allowed-tools: Bash(flutter:*), Bash(flutter run:*), Bash(dart:*), Bash(patrol:*), Bash(adb:*), Bash(xcrun:*), Bash(ps:*), Bash(mobilecli:*), Bash(npx mobilecli:*), Read, Edit, Grep, Glob
-argument-hint: [失败描述 / crash 信息（可选，不填则分析最近一次失败）]
+argument-hint: [failure description / crash info (optional; if omitted, analyzes the most recent failure)]
 ---
 
-**调试目标**：$ARGUMENTS（没提供则分析当前状态的最近一次失败）
+**Debug target**: $ARGUMENTS (if not provided, analyzes the most recent failure in the current state)
 
-规则、定位优先级、失败分类全部对齐 `flutter-autonomous` skill。本命令侧重「定位根因」，可改实现修复，**没有 Write 权限**——新建文件请走 `/ship`。
+Rules, locating priority, and failure classification all align with the `flutter-autonomous` skill. This command focuses on "locating the root cause"; it may modify the implementation to fix it, but **has no Write permission**—to create new files, use `/ship`.
 
 ---
 
-## 第 1 步：并行收证
+## Step 1: Gather evidence in parallel
 
-无依赖，**同一批一起发**（设备发现不写死 id；iOS 日志走 `xcrun simctl spawn`，见 references/ios.md）：
+No dependencies, **send the whole batch together** (don't hardcode device id in device discovery; iOS logs go through `xcrun simctl spawn`, see references/ios.md):
 
 ```bash
-# App 运行时日志（连接/状态机/异常栈最硬的证据）
+# App runtime logs (the hardest evidence for connection / state machine / exception stacks)
 flutter logs 2>&1 | tail -120
-adb logcat -s flutter -d 2>&1 | tail -120                       # Android；先认目标 App PID 防串台
+adb logcat -s flutter -d 2>&1 | tail -120                       # Android; first identify the target App PID to prevent cross-talk
 
-# Crash 报告
-mobilecli devices                                               # 拿在线设备 id
+# Crash report
+mobilecli devices                                               # get online device id
 mobilecli device crashes list --device <id>
-# 有 crash 再拉详情：mobilecli device crashes get <crash_id> --device <id>
+# if there's a crash, pull details: mobilecli device crashes get <crash_id> --device <id>
 
-# 静态分析（编译类失败的根因常在这）
+# Static analysis (the root cause of compile-class failures is often here)
 flutter analyze 2>&1 | tail -60
 ```
 
 ---
 
-## 第 2 步：按类型定位根因
+## Step 2: Locate the root cause by type
 
-- **Crash**：在堆栈里找**第一个 `package:<your_app>/` 的行**——那就是 crash 的代码位置，读那段。系统/框架帧往下跳过。
-- **断言失败**：比对「测试期望的状态」vs「实现实际产生的状态」，找逻辑差异点。
-- **`found 0 widgets`**：查 `Key` 拼写（大小写/下划线）→ 查条件渲染逻辑 → 查控件是否在视口外（需 `scrollTo`）→ 若控件根本没暴露 `Semantics` 则 `dump ui` 也列不出，定位为代码缺 `Semantics`。
-- **编译错误**：读**完整**错误信息（不只末行），常是类型/import/缺参数。
+- **Crash**: in the stack trace find the **first line under `package:<your_app>/`**—that's the code location of the crash, read that section. Skip system/framework frames below it.
+- **Assertion failure**: compare "the state the test expected" vs "the state the implementation actually produced", and find the point of logical divergence.
+- **`found 0 widgets`**: check `Key` spelling (case/underscore) → check conditional rendering logic → check whether the widget is outside the viewport (needs `scrollTo`) → if the widget doesn't expose `Semantics` at all, then `dump ui` won't list it either, so locate it as the code missing `Semantics`.
+- **Compile error**: read the **full** error message (not just the last line); it's usually type / import / missing argument.
 
-定位手段优先元素驱动与日志：`mobilecli dump ui --device <id>` 看控件实际有没有暴露、label 是什么；`mobilecli screenshot` 看当时屏幕状态。
-
----
-
-## 第 3 步：修复
-
-- **修实现，不改测试来绕过失败**（断言失败=逻辑 bug）。
-- 仅当确认是用例本身写错（Key 名拼错、漏 `pumpAndSettle`）才改测试——且要先排除实现问题。
+Prefer element-driven means and logs for locating: `mobilecli dump ui --device <id>` to see whether the widget is actually exposed and what its label is; `mobilecli screenshot` to see the on-screen state at the time.
 
 ---
 
-## 第 4 步：验证修复
+## Step 3: Fix
+
+- **Fix the implementation, don't change the test to work around the failure** (an assertion failure = a logic bug).
+- Only change the test when you've confirmed the test case itself is wrong (misspelled Key name, missing `pumpAndSettle`)—and only after ruling out an implementation problem first.
+
+---
+
+## Step 4: Verify the fix
 
 ```bash
-flutter analyze                                                 # 无新错误
-patrol test -t <相关测试文件> --device <id>                      # 复跑确认通过；iOS 默认模拟器
+flutter analyze                                                 # no new errors
+patrol test -t <relevant test file> --device <id>               # re-run to confirm it passes; iOS defaults to simulator
 ```
 
 ---
 
-## 输出根因报告
+## Output the root-cause report
 
 ```
-## 调试报告
+## Debug Report
 
-根因：<一句话，是什么问题>
-位置：<文件:行号>
-原因分析：<为什么会发生>
-修复内容：
-- <文件>：改动说明
-验证：<重跑 analyze / patrol 的结果>
-遗留：无 / <需人工决策的点>
+Root cause: <one sentence, what the problem is>
+Location: <file:line>
+Cause analysis: <why it happened>
+Fix: 
+- <file>: description of the change
+Verification: <result of re-running analyze / patrol>
+Remaining: none / <points needing manual decision>
 ```

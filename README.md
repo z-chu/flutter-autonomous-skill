@@ -114,15 +114,18 @@ skills/flutter-autonomous/
 │   ├── bootstrap.sh         # cross-platform environment self-bootstrap (idempotent)
 │   └── tap-by-label.sh      # tap a Flutter widget by Semantics label in one command
 ├── references/              # loaded on demand, not upfront (token-efficient)
-│   ├── ios.md               # simulator-first iOS: simctl / WDA / provisioning / teardown
-│   ├── android.md           # adb specifics, log forensics, airplane-network recovery
-│   ├── offline-test-layer.md# four fixture strategies for second-fast logic tests
-│   ├── tool-decision-tree.md# when to use mobilecli / mobile-mcp / mobilewright / Patrol
+│   ├── vm-service.md        # evidence from inside the running app: widget tree with source
+│   │                        # line numbers / real layout sizes / structured errors / live state
+│   ├── ios.md               # simulator-first iOS: simctl / WDA / provisioning / determinism / teardown
+│   ├── android.md           # adb specifics, log-window assertions, determinism switches, perf, offline tests
+│   ├── offline-test-layer.md# three device-free layers: four fixture strategies + widget test + golden/a11y
+│   ├── tool-decision-tree.md# when to use mobilecli / VM Service / mobile-mcp / mobilewright / Patrol
 │   └── scaling.md           # trust ladder, parallel worktrees, overnight unattended runs
 ├── templates/               # installed into YOUR project by setup-project.sh
 │   └── .claude/             # permission allowlist, format/analyze hooks,
 │                            # /spec /ship /verify /debug /nightly commands
-├── en/                      # full English mirror of SKILL.md + references + templates
+├── zh/                      # Chinese copy of SKILL.md + references + templates
+│                            # (edited first, then synced into the English files above)
 └── setup-project.sh         # one-command project wiring
 ```
 
@@ -171,12 +174,12 @@ Yes. Patrol tests live in the standard `integration_test/`, offline tests in `te
 
 ## Contributing
 
-Issues and PRs welcome. The Chinese `SKILL.md` is the source of truth; the `en/` mirror is synced after changes. Keep `SKILL.md` under ~500 lines — depth goes in `references/`.
+Issues and PRs welcome. **English is what ships** — `skills/flutter-autonomous/SKILL.md` and its `references/` and `templates/` are the files Claude actually loads. The `zh/` copy is the maintainer's working language: changes are drafted there first and then synced into the English files. PRs in English are entirely welcome and do not need a `zh/` update — just say so, and the Chinese side gets caught up afterwards. Keep `SKILL.md` under ~500 lines — depth goes in `references/`.
 
 Before opening a PR, run the mirror check — "sync it afterwards" is an honor-system rule that has silently failed before, leaving English users on behavior the Chinese side had already dropped:
 
 ```bash
-bash tools/check-mirror.sh              # every zh file has an en counterpart, structurally aligned
+bash tools/check-mirror.sh              # every zh/ file has an English counterpart, structurally aligned
 bash tools/check-mirror.sh --diff main  # this branch never changes one side alone
 ```
 

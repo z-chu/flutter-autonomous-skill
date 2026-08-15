@@ -1,90 +1,88 @@
 ---
-description: 全自主交付单个功能：定标准 → 实现 → 分层验证（先离线后设备）→ 修复 → 截图 →（按用户提交策略处理提交）
+description: Fully autonomous delivery of a single feature: define criteria → implement → layered verification (offline first, then device) → fix → screenshot → (handle the commit per the user's commit policy)
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
-argument-hint: [一句话需求，包含「完成的样子」]
+argument-hint: [one-line requirement, including "what done looks like"]
 ---
 
-需求：$ARGUMENTS
+Requirement: $ARGUMENTS
 
-**全程自主执行。** **绿区**的事自己做完接着干；**红线**操作（花真钱 / 密钥凭证 / 不可逆破坏，含项目 CLAUDE.md 的特有红线）**默认禁止**——仅用户已事先明确授权（本次指令，或项目 CLAUDE.md 里写明的授权例外）才可做，未授权则该项跳过并在报告标注「需授权」；只有设备物理掉线（自救一次仍败）或需求有无法自决的歧义时才停下。规则、定位优先级、Key+Semantics 双标、热重载档位、收尾两步全部对齐 `flutter-autonomous` skill，本命令只走流程。**提交不是默认动作**——按用户提交策略处理（见第 5 步）。
-
----
-
-## 第 1 步：定验收标准（自己确认，不等人）
-
-展开 3~8 条可断言验收条件：每条「操作（找 `Key`/label → 做什么）→ 预期」；列出要新增的 `Key`+`Semantics` 控件清单；列出要改的文件；**逐条标清落哪层验证**：纯逻辑 → 离线 fixture；交互/跳转 → widget test 织回归网；视觉/深色/大字号 → golden 矩阵；连接/状态机 → 日志取证；**真机渲染观感·系统集成·真实数据 → 设备层**。
-
-> **只要这次动了 UI，验收条件里必须至少有一条是「上设备真跑 + 截图核验」**——离线层是回归网和省时手段，不能替代亲眼看一次真机效果。
-
-需求本身有无法自决的歧义（不知跳哪页、UI 不明确、平台不明确）→ **停下说明歧义点，等我确认**。
+**Execute fully autonomously.** **Green zone** work — do it and keep going; **red-line** operations (real money / secrets & credentials / irreversible destruction, plus the project CLAUDE.md's project-specific red lines) are **denied by default** — do them only with explicit upfront user authorization (this run's instructions, or authorized exceptions written in the project CLAUDE.md); if unauthorized, skip that item and mark "authorization needed" in the report. Only stop when the device is physically disconnected (after one self-recovery attempt) or when the requirement has an ambiguity you cannot resolve on your own. Rules, lookup priority, the Key+Semantics dual-standard, hot reload tiers, and the two teardown steps all align with the `flutter-autonomous` skill; this command only drives the flow. **Committing is not a default action** — handle it per the user's commit policy (see Step 5).
 
 ---
 
-## 第 2 步：实现
+## Step 1: Define acceptance criteria (confirm them yourself, don't wait)
 
-- 写 Dart 实现，遵守项目 `CLAUDE.md` 全部约定。
-- 关键控件加 `key: const Key('xxx')`（Patrol 用）+ `Semantics(label:)`（元素驱动用）；自定义手势控件显式包 `Semantics(label+button:true)`。
-- 同步配套测试，**按第 1 步标好的层写**：纯逻辑 → `test/.../xxx_test.dart`（fixture/mock）；交互/跳转 → `test/.../xxx_widget_test.dart`（`testWidgets`，无设备）；视觉 → `test/.../xxx_golden_test.dart` + `test/goldens/`（主题×字号矩阵）；无障碍契约 → 一条 `meetsGuideline` 自检；**只有真机才能验的**才写 `integration_test/<feature>_test.dart`（Patrol，按 `Key`）。
-- 改代码靠 `--pid-file` + `USR1`(方法体热重载) / `USR2`(初始化·main·路由热重启)，别动不动冷启。
+Expand into 3~8 assertable acceptance conditions: each one is "action (find `Key`/label → do what) → expected"; list the `Key`+`Semantics` widgets to add; list the files to change; mark for each which layer verifies it (offline fixture / device / log evidence).
+
+If the requirement itself has an ambiguity you cannot resolve on your own (don't know which page to jump to, UI unclear, platform unclear) → **stop, explain the ambiguous points, and wait for my confirmation**.
 
 ---
 
-## 第 3 步：分层验证（顺序固定，≤5 轮自修复）
+## Step 2: Implement
 
-每轮：
+- Write the Dart implementation, following all conventions in the project `CLAUDE.md`.
+- Add `key: const Key('xxx')` to key widgets (used by Patrol) + `Semantics(label:)` (used for element-driven interaction); wrap custom gesture widgets explicitly with `Semantics(label+button:true)`.
+- Add the accompanying tests in sync: pure logic that can be locked offline goes in `test/.../xxx_test.dart` (fixture/mock); interaction/navigation/display goes in `integration_test/<feature>_test.dart` (turn each acceptance condition into a Patrol case, by `Key`).
+- Code changes rely on `--pid-file` + `USR1` (method-body hot reload) / `USR2` (init·main·route hot restart) — don't cold-start at the drop of a hat.
+
+---
+
+## Step 3: Layered verification (fixed order, ≤5 rounds of self-fixing)
+
+Each round:
 
 ```bash
-flutter analyze                       # ① 零警告才继续
-flutter test                          # ② 离线层：纯逻辑 + widget test + golden/a11y 一把跑完（无 test/ 跳过）
-mobilecli devices                     # ③ 设备发现（不写死 id；iOS 默认模拟器，见 references/ios.md）
-mobilecli apps foreground --device <id>   # 进设备前确认前台=目标包，防串台
-patrol test -t integration_test/<feature>_test.dart --device <deviceId>   # ④ 设备层：Patrol 按 Key
+flutter analyze                       # ① continue only at zero warnings
+flutter test                          # ② offline layer: pure logic + widget test + golden/a11y in one run (skip if no test/)
+mobilecli devices                     # ③ device discovery (don't hardcode id; iOS defaults to simulator, see references/ios.md)
+mobilecli apps foreground --device <id>   # before entering the device, confirm foreground = target package, to prevent cross-talk
+patrol test -t integration_test/<feature>_test.dart --device <deviceId>   # ④ device layer: Patrol by Key
 ```
 
-- 离线层（②）失败 = 逻辑/行为/视觉契约 bug，按下方分类 C 修实现、**不降断言**，离线全绿才上设备。
-- golden 失败先读 `test/failures/*_isolatedDiff.png` 判断变化是否预期，**是预期才 `--update-goldens`**。
-- 设备都空：环境自举自救一次仍空 = 离线，停止报告。
-- **失败分类**（断言失败=改实现不改测试）：
-  - A 编译失败 → 读完整 analyze 输出修，回轮首
-  - B `found 0 widgets` → **先用 VM Service 拉 widget 树核对 Key**（`ext.flutter.inspector.getRootWidgetSummaryTree`，带源码行号，见 skill `references/vm-service.md` §3.1）→ 再查条件渲染 / 需否 `.scrollTo()`；`dump ui` 列不出=回代码补 `Semantics` + 补一条 `meetsGuideline` 自检
-  - C 断言失败 → 逻辑 bug，修实现，不降标准
-  - D crash/超时 → `mobilecli device crashes list/get` 读堆栈首个 `package:<your_app>/` 行
-  - E 安装/断连 → `mobilecli devices` 重试一次仍败则停
-- **第 5 轮仍未通过**：停止本功能，输出卡住报告（失败现象 / 错误原文 / 已试方向 / 根因推测）。
+- Offline layer (②) failure = a logic/behavior/visual-contract bug: fix the implementation per category C below, **do not weaken assertions**; only go to the device once offline is fully green.
+- If a golden fails, read `test/failures/*_isolatedDiff.png` first to judge whether the change was intended — **only then `--update-goldens`**.
+- Devices all empty: if it's still empty after one round of environment bootstrap self-recovery = offline, stop and report.
+- **Failure categories** (assertion failure = change implementation, not the test):
+  - A compile failure → read the full analyze output and fix, back to round start
+  - B `found 0 widgets` → **first pull the widget tree from the VM Service to check the Key** (`ext.flutter.inspector.getRootWidgetSummaryTree`, carries source line numbers — see the skill's `references/vm-service.md` §3.1) → then check conditional rendering / whether `.scrollTo()` is needed; a widget `dump ui` won't list = back to the code to add `Semantics` + add a `meetsGuideline` self-check
+  - C assertion failure → logic bug, fix the implementation, don't lower the bar
+  - D crash/timeout → `mobilecli device crashes list/get` to read the first `package:<your_app>/` line of the stack
+  - E install/disconnect → `mobilecli devices` retry once, stop if it still fails
+- **Still not passing on round 5**: stop this feature and output a stuck report (failure symptom / verbatim error / directions already tried / suspected root cause).
 
 ---
 
-## 第 4 步：截图核验
+## Step 4: Screenshot verification
 
-`mobilecli screenshot --device <id> -o <out>` → Read 自检布局/截断/颜色/空态/Loading。视觉问题改代码即可，不必重跑 Patrol（除非视觉修复动了功能逻辑）。
+`mobilecli screenshot --device <id> -o <out>` → Read to self-check layout/truncation/color/empty-state/Loading. Visual issues just need code changes, no need to rerun Patrol (unless the visual fix touched functional logic).
 
 ---
 
-## 第 5 步：收尾 +（按提交策略）处理提交
+## Step 5: Teardown + (per commit policy) handle the commit
 
 ```bash
-# 收尾两步并回查（kill flutter run ≠ 关 App）——这步永远要做
+# Two teardown steps with verification (kill flutter run ≠ closing the App) — always do this step
 kill "$(cat <PID_FILE>)" 2>/dev/null
 mobilecli apps terminate --device <id> <packageName>
-mobilecli apps foreground --device <id>            # 回查确认已关
+mobilecli apps foreground --device <id>            # verify it's actually closed
 ```
 
-**提交不是本流程默认动作**：按用户的提交策略处理（开工前问清 / 见项目 `CLAUDE.md` 里写的提交策略）——增量提 / 干完再统一提 / 不提（人工自己提）/ 其它。**不默认自动提交。** 若策略要提交，规范以用户全局 / 项目 `CLAUDE.md` 为准（精确 `git add` 不用 `git add .`、约定式 message、含反引号/`$`/`!` 用单引号或 `-F`、绝不加 AI 署名、是否 push 看策略），提交后 `git log -1 --stat` 回查 HEAD 确实动了。
+**Committing is not a default action of this flow**: handle it per the user's commit policy (ask up front before starting / see the commit policy in the project `CLAUDE.md`) — commit incrementally / commit everything together once done / don't commit (the human commits themselves) / other. **Do not auto-commit by default.** If the policy is to commit, the conventions follow the user's global / project `CLAUDE.md` (precise `git add`, not `git add .`; conventional message; for text containing backticks/`$`/`!` use single quotes or `-F`; never add an AI attribution footer; whether to push depends on the policy), and after committing run `git log -1 --stat` to verify HEAD actually moved.
 
 ---
 
-## 第 6 步：报告
+## Step 6: Report
 
 ```
-## ✅ 功能：<功能名>
+## ✅ Feature: <feature name>
 
-验收条件：
-- [x] 条件1
-- [x] 条件2
+Acceptance conditions:
+- [x] Condition 1
+- [x] Condition 2
 
-改动：lib/xxx.dart, test/xxx_test.dart, test/xxx_widget_test.dart, test/goldens/*, integration_test/xxx_test.dart
-验证：analyze ✅ / flutter test ✅(N，含 widget/golden/a11y) / patrol ✅(N) / 截图 ✅
-Commit：（若按策略提交了）<hash> feat: xxx（已回查 HEAD）/ 否则注明「按策略不提交」
-截图：（关键截图）
-遗留：无 / <具体>
+Changes: lib/xxx.dart, integration_test/xxx_test.dart, test/xxx_test.dart
+Verification: analyze ✅ / flutter test ✅(N) / patrol ✅(N) / screenshot ✅
+Commit: (if committed per the policy) <hash> feat: xxx (HEAD verified) / otherwise note "not committed per policy"
+Screenshots: (key screenshots)
+Remaining: none / <specifics>
 ```
