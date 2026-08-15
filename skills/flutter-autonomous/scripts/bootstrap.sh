@@ -96,29 +96,162 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# mobilecli(交互底座:dump ui / io tap,免 MCP/重启)。缺 → npm 全局装。
+# mobilecli(交互底座:dump ui / io tap,免 MCP/重启)。
+# 渠道一:npm 全局装。渠道二:GitHub Releases 下 Go 二进制。
+# 企业 DLP 网关常拦 npm registry 而放行 GitHub —— 此时渠道二是唯一通路。
+# 注意 npx 与 npm i -g 走同一个 registry,不构成回退,故不再作为兜底建议。
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# GitHub Releases 渠道(通用)——npm/brew 被企业网关拦时的备用路。
+# 只针对【包管理源被拦】(现实里就是 npm 这类);Xcode/Android SDK/Google/Apple
+# 的分发不在考虑范围——公司真拦那些,他们自己的开发也没法干活。
+# 自动回退的:mobilecli、jq(上游 Releases 有预编译产物)。
+# 救不了的:mobile-mcp、mobilewright(npm 包,release 无资产,clone 下来仍要
+# npm install 拉依赖)、patrol_cli(发 pub.dev,是独立通道,npm 被拦不代表它被拦)。
+# ─────────────────────────────────────────────────────────────────────────────
+LOCAL_BIN="$HOME/.local/bin"
+
+# 最新 tag:走 releases/latest 的重定向,不碰 API,不受未认证速率限制。
+gh_latest_tag() {
+  curl -sSLI -m 20 -o /dev/null -w '%{url_effective}' \
+    "https://github.com/$1/releases/latest" 2>/dev/null | sed 's#.*/tag/##'
+}
+
+# gh_asset_url <repo> <资产名关键字> → echo 下载地址;失败非 0。
+# 一律【在真实资产列表里匹配】而不是拼文件名——上游改命名(加 v 前缀、
+# 换 darwin/amd64 写法)也不会断。
+gh_asset_url() {
+  local repo="$1" pat="$2" tag name url
+  tag="$(gh_latest_tag "$repo")"; [ -n "$tag" ] || return 1
+  # ① expanded_assets 片段:不走 API、不受限流,返回的是真实资产名
+  name="$(curl -sSL -m 20 "https://github.com/$repo/releases/expanded_assets/$tag" 2>/dev/null \
+          | grep -oE 'href="[^"]*/download/[^"]*"' | sed 's#.*/##;s/"$//' \
+          | grep -- "$pat" | head -1)"
+  [ -n "$name" ] && { echo "https://github.com/$repo/releases/download/$tag/$name"; return 0; }
+  # ② 退回 API(未认证有速率限制,超了返回 403)
+  url="$(curl -sSL -m 20 "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null \
+         | grep -o '"browser_download_url": *"[^"]*'"$pat"'[^"]*"' | head -1 | cut -d'"' -f4)"
+  [ -n "$url" ] && { echo "$url"; return 0; }
+  return 1
+}
+
+# 装完统一修两处:zip 解出来没执行位;mac 上 curl 下来的都带 Gatekeeper 隔离属性。
+fix_downloaded_bin() {
+  chmod +x "$1" 2>/dev/null
+  [ "$IS_MAC" -eq 1 ] && xattr -d com.apple.quarantine "$1" 2>/dev/null
+  return 0
+}
+
+# gh_install <repo> <资产关键字> <落地命令名> [zip]
+#   第 4 参给 "zip" 表示资产是压缩包(需解压后 find 出同名可执行);否则按裸二进制处理。
+gh_install() {
+  local repo="$1" pat="$2" bin="$3" kind="${4:-bare}" url tmp found
+  have curl || { log "  无 curl,GitHub 渠道不可用"; return 1; }
+  url="$(gh_asset_url "$repo" "$pat")" || { log "  未在 $repo 最新 release 找到含「$pat」的资产"; return 1; }
+  log "  下载 $url"
+  tmp="$(mktemp -d)" || return 1
+  mkdir -p "$LOCAL_BIN"
+  if [ "$kind" = zip ]; then
+    have unzip || { log "  无 unzip,无法解压"; rm -rf "$tmp"; return 1; }
+    curl -sSL -m 180 -o "$tmp/a.zip" "$url" || { rm -rf "$tmp"; return 1; }
+    unzip -oq "$tmp/a.zip" -d "$tmp/x"      || { rm -rf "$tmp"; return 1; }
+    found="$(find "$tmp/x" -name "$bin" -type f 2>/dev/null | head -1)"
+    [ -n "$found" ] || { log "  压缩包里没找到 $bin"; rm -rf "$tmp"; return 1; }
+    cp "$found" "$LOCAL_BIN/$bin" || { rm -rf "$tmp"; return 1; }
+  else
+    curl -sSL -m 180 -o "$LOCAL_BIN/$bin" "$url" || { rm -rf "$tmp"; return 1; }
+  fi
+  rm -rf "$tmp"
+  fix_downloaded_bin "$LOCAL_BIN/$bin"
+  export PATH="$LOCAL_BIN:$PATH"            # 本进程内立即可用(注意:不跨 shell 留存)
+  have "$bin"
+}
+
+# ~/.local/bin 可能已有产物但不在 PATH —— 先补进来,避免重复安装
+case ":$PATH:" in *":$LOCAL_BIN:"*) : ;; *) [ -d "$LOCAL_BIN" ] && export PATH="$LOCAL_BIN:$PATH" ;; esac
+
+# ─────────────────────────────────────────────────────────────────────────────
+# jq —— scripts/tap-by-label.sh 硬依赖(缺了「按 label 一步点」就没法用)。
+# 官方直接挂裸静态二进制,连解压都不用,是 brew 不可用时最容易补的一个。
+# ─────────────────────────────────────────────────────────────────────────────
+section "jq (tap-by-label.sh 依赖)"
+if have jq; then
+  log "$(jq --version 2>/dev/null || echo jq)"
+  add_ok "jq" "$(jq --version 2>/dev/null || echo '已装')"
+else
+  JQ_DONE=0
+  if [ "$IS_MAC" -eq 1 ] && have brew; then
+    log "未找到 jq,渠道一:brew install jq…"
+    brew install jq >/dev/null 2>&1 && have jq && JQ_DONE=1
+  elif [ "$IS_LINUX" -eq 1 ] && have apt-get; then
+    log "未找到 jq,渠道一:apt-get install jq…"
+    sudo -n apt-get install -y jq >/dev/null 2>&1 && have jq && JQ_DONE=1
+  fi
+  if [ "$JQ_DONE" -eq 1 ]; then
+    log "已安装并回验:$(jq --version 2>/dev/null)"
+    add_fix "jq" "包管理器已装:$(jq --version 2>/dev/null)"
+  else
+    log "包管理器渠道不通,转渠道二:GitHub Releases(裸静态二进制)…"
+    case "$(uname -s)/$(uname -m)" in
+      Darwin/arm64)  JQ_PAT=macos-arm64 ;;
+      Darwin/x86_64) JQ_PAT=macos-amd64 ;;
+      Linux/aarch64) JQ_PAT=linux-arm64 ;;
+      Linux/x86_64)  JQ_PAT=linux-amd64 ;;
+      *)             JQ_PAT='' ;;
+    esac
+    if [ -n "$JQ_PAT" ] && gh_install jqlang/jq "$JQ_PAT" jq; then
+      log "已从 GitHub Releases 安装并回验:$(jq --version 2>/dev/null)"
+      add_fix "jq" "GitHub Releases 已装(在 $LOCAL_BIN)"
+    else
+      log "两条渠道都不通。tap-by-label.sh 将不可用(仍可手动 dump ui → io tap)。"
+      log "  手挑产物:https://github.com/jqlang/jq/releases"
+      add_bad "jq" "未装;tap-by-label.sh 不可用,见 references/restricted-network.md"
+    fi
+  fi
+fi
+
 section "mobilecli (交互底座)"
 if have mobilecli; then
   MC_VER="$(mobilecli --version 2>/dev/null | head -n1 || echo 'mobilecli')"
   log "$MC_VER"
   add_ok "mobilecli" "$MC_VER"
 else
-  log "未找到 mobilecli,尝试 npm 全局安装…"
+  MC_DONE=0
   if have npm; then
+    log "未找到 mobilecli,渠道一:npm 全局安装…"
     if npm i -g mobilecli@latest >/dev/null 2>&1 && have mobilecli; then
       MC_VER="$(mobilecli --version 2>/dev/null | head -n1 || echo 'mobilecli')"
       log "已安装并回验:$MC_VER"
       add_fix "mobilecli" "npm i -g 已装:$MC_VER"
+      MC_DONE=1
     else
-      log "npm 全局安装失败(权限/网络?)。回退方案:"
-      log "  临时用:  npx mobilecli@latest <子命令>"
-      log "  或源码:  git clone 仓库 && make build,再把产物加入 PATH"
-      add_bad "mobilecli" "npm 装失败;改用 npx mobilecli@latest 或源码 make build"
+      log "npm 渠道不通(权限/网络/企业网关拦截)。转渠道二:GitHub Releases…"
     fi
   else
-    log "无 npm,无法自动装。回退:npx mobilecli@latest <子命令> 或源码 make build。"
-    add_bad "mobilecli" "无 npm;用 npx 或源码安装"
+    log "无 npm。直接走渠道二:GitHub Releases…"
+  fi
+
+  if [ "$MC_DONE" -eq 0 ]; then
+    case "$(uname -s)/$(uname -m)" in
+      Darwin/arm64)  MC_PAT=macos-arm64 ;;
+      Darwin/x86_64) MC_PAT=macos-x64 ;;
+      Linux/aarch64) MC_PAT=linux-arm64 ;;
+      Linux/x86_64)  MC_PAT=linux-x64 ;;
+      *)             MC_PAT='' ;;
+    esac
+    if [ -n "$MC_PAT" ] && gh_install mobile-next/mobilecli "$MC_PAT" mobilecli zip; then
+      MC_VER="$(mobilecli --version 2>/dev/null | head -n1 || echo 'mobilecli')"
+      log "已从 GitHub Releases 安装并回验:$MC_VER"
+      log "  ⚠ 装在 $LOCAL_BIN,不在默认 PATH —— 后续每条命令前加:"
+      log "      export PATH=\"$LOCAL_BIN:\$PATH\"; mobilecli ..."
+      add_fix "mobilecli" "GitHub Releases 已装:$MC_VER(需 export PATH=$LOCAL_BIN)"
+    else
+      log "两条渠道都不通。手动排查:"
+      log "  curl -sSL -m 10 -o /dev/null -w '%{http_code}\\n' https://github.com"
+      log "  通 → 去 https://github.com/mobile-next/mobilecli/releases 手挑平台产物"
+      log "  详见 references/restricted-network.md(备用渠道 / macOS 执行位与 quarantine)"
+      add_bad "mobilecli" "npm 与 GitHub 渠道均不通;见 references/restricted-network.md"
+    fi
   fi
 fi
 
@@ -283,9 +416,10 @@ if [ "$IS_MAC" -eq 1 ]; then
     log "go-ios: $IOS_VER"
     add_ok "ios-go-ios" "$IOS_VER"
   else
-    log "未找到 go-ios(仅真机调试需要;纯模拟器可忽略)。安装:"
+    # 仅「真机 + mobile-mcp」才需要(mobilecli 驱动真机自带隧道,不依赖它)。不主动装。
+    log "未找到 go-ios(仅「真机 + mobile-mcp」需要;模拟器与 mobilecli 真机都不需要)。安装:"
     log "  npm i -g go-ios"
-    add_skip "ios-go-ios" "缺(真机才需):npm i -g go-ios"
+    add_skip "ios-go-ios" "缺(真机+mobile-mcp 才需):npm i -g go-ios"
   fi
 
   # 4) WebDriverAgent(真机交互后端,可选):localhost:8100/status

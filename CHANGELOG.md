@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.1.0] - 2026-08-16
 
+### Added
+
+- **A GitHub Releases fallback when npm is blocked.** Reported from the field: a
+  corporate gateway intercepted the npm registry while GitHub stayed open, and
+  the skill's only documented fallbacks (`npx`, which hits the same registry,
+  and building from source, which needs a Go toolchain) were both dead ends — so
+  the run stopped for a human when it did not have to.
+  - `scripts/bootstrap.sh` now falls back to GitHub Releases for mobilecli and
+    jq, handling both macOS traps (missing exec bit, Gatekeeper quarantine).
+    It costs an unaffected machine nothing — the fallback only runs once the
+    normal channel has failed.
+  - A two-line rule in §2: classify a blocker as a **channel** problem (still
+    green zone — switch routes and continue) or a **permission** problem (a
+    genuine stop, since only a human can grant it in a GUI). Getting it
+    backwards costs either a needless stop or a burnt round of self-repair.
+  - `references/restricted-network.md` holds the rest behind a pointer, kept to
+    the handful of things an agent can't guess (npx shares the registry;
+    Gatekeeper quarantine; PATH not persisting across Bash calls; which tools
+    GitHub can't rescue). Scope is a blocked package source only — Xcode, the
+    Android SDK and vendor distribution domains are deliberately out of scope.
+- **`scripts/bootstrap.sh` now checks jq**, a hard dependency of
+  `scripts/tap-by-label.sh` that was previously never verified.
+- Two iOS gotchas: `agent install` backgrounds the app under test (relaunch
+  before dumping), and `xcrun simctl privacy grant/revoke` commonly fails with
+  `Operation not permitted` (reinstall the app or toggle the switch in Settings).
+- A Flutter interaction limit: a WDA-synthesised `io longpress` may not register
+  on the Flutter side; prefer making the gesture a tappable control with
+  `Semantics` instead of fighting it.
+
 ### Changed
 
 - **Red lines are now deny-by-default.** Spending real money, touching secrets or

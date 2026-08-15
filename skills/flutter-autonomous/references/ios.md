@@ -124,6 +124,10 @@ mobilecli agent install \
 
 装好后，`io tap` / `dump ui` / `screenshot` 等命令与模拟器**完全一致**，差异已被 mobilecli 抹平。
 
+> ⚠️ **`agent install` 会把被测 App 顶到后台**（agent 本身是个 UITest runner，装完设备/模拟器会回到桌面）。装完别直接 `dump ui`——那时前台已经不是你的 App 了。**先 `apps launch` 重新拉起，再 `apps foreground` 确认，然后才 dump**（防串台那一套照走）。
+>
+> 模拟器上同样如此：`dump ui` 报 `agent is not installed, use 'mobilecli agent install'` 时，`mobilecli agent install --device <udid>` 装好（模拟器不需要 provisioning profile），然后重新 launch。
+
 **⚠️ 真机截图速度**：iOS 真机经 WDA over USB 隧道截图每次约 **15–20 秒**（首次更长，含 WDA 冷启），属正常。建议减少截图频率——优先用 `dump ui` 判断页面状态，只在必要时（页面跳转验证、视觉布局核验）才截图。
 
 ### 2.3 mobile-mcp 真机：另需 go-ios + 隧道 + WDA
@@ -191,8 +195,9 @@ WDA 取设备无障碍树后，**只保留**满足以下两条的元素：
 | 硬键 `HOME` / `VOLUME_UP` / `VOLUME_DOWN` | 有（WDA 支持 home/volumeup/volumedown） | `mobilecli io button --device <udid> HOME` |
 | `ENTER`（提交输入） | 经 WDA 发 `\n` | `io text` 里带换行，或 `io button ENTER` |
 | 屏幕视频流 | **仅 mjpeg**（`screencapture --format mjpeg`；avc/H.264 是 Android only） | `mobilecli screencapture --device <udid> --format mjpeg \| ffplay -` |
+| 改权限授权状态（`xcrun simctl privacy grant/revoke`） | **常报 `Operation not permitted`**（受 macOS 自身权限限制，不是命令写错） | 想回到「未决定」态：`apps uninstall` → `apps install` 重装 App；想开关某项权限：`am start` 等价的 iOS 做法是打开系统设置页，用元素驱动点开关（设置是原生页，控件天生有无障碍标签） |
 
-口诀：**iOS 上别发 BACK/DPAD、别用 fs 任意路径、别 apps clear、screencapture 别要 avc**——这些一发就报错或无效，浪费一轮自修复。
+口诀：**iOS 上别发 BACK/DPAD、别用 fs 任意路径、别 apps clear、screencapture 别要 avc、别指望 simctl privacy 改权限**——这些一发就报错或无效，浪费一轮自修复。
 
 ---
 

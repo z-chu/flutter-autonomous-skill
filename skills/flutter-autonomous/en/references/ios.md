@@ -124,6 +124,10 @@ mobilecli agent install \
 
 Once installed, commands like `io tap` / `dump ui` / `screenshot` are **exactly the same** as on the simulator — the difference has been smoothed over by mobilecli.
 
+> ⚠️ **`agent install` pushes the app under test into the background** (the agent is itself a UITest runner, so the device/simulator returns to the home screen once it's installed). Don't `dump ui` straight afterwards — the foreground is no longer your app. **`apps launch` to bring it back, `apps foreground` to confirm, then dump** (the usual anti-cross-talk routine).
+>
+> The same applies on the simulator: when `dump ui` reports `agent is not installed, use 'mobilecli agent install'`, run `mobilecli agent install --device <udid>` (no provisioning profile needed on a simulator), then relaunch the app.
+
 **⚠️ Real-device screenshot speed**: on a real iOS device, each screenshot via WDA over the USB tunnel takes about **15–20 seconds** (longer on the first one, including WDA cold start) — this is normal. Reduce screenshot frequency — prefer `dump ui` to judge page state, and only take screenshots when necessary (verifying navigation, checking visual layout).
 
 ### 2.3 mobile-mcp real device: additionally needs go-ios + tunnel + WDA
@@ -192,7 +196,9 @@ After WDA fetches the device's accessibility tree, it **only keeps** elements th
 | `ENTER` (submit input) | Send `\n` via WDA | include a newline in `io text`, or `io button ENTER` |
 | Screen video stream | **mjpeg only** (`screencapture --format mjpeg`; avc/H.264 is Android only) | `mobilecli screencapture --device <udid> --format mjpeg \| ffplay -` |
 
-Mnemonic: **on iOS don't send BACK/DPAD, don't use fs arbitrary paths, don't apps clear, don't request avc for screencapture** — any of these errors or no-ops on send, wasting a self-repair round.
+| Changing permission grant state (`xcrun simctl privacy grant/revoke`) | **Often `Operation not permitted`** (blocked by macOS's own permissions, not a malformed command) | To get back to "not determined": `apps uninstall` → `apps install`. To toggle a specific permission: open the Settings page and tap the switch with element-driven interaction (Settings is native, so its controls carry accessibility labels) |
+
+Mnemonic: **on iOS don't send BACK/DPAD, don't use fs arbitrary paths, don't apps clear, don't request avc for screencapture, don't expect simctl privacy to change grants** — any of these errors or no-ops on send, wasting a self-repair round.
 
 ---
 

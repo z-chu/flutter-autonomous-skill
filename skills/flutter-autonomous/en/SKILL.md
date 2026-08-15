@@ -39,7 +39,7 @@ One-shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, id
 | Check | Command | What to do if missing (do it yourself) |
 |---|---|---|
 | Device online | `mobilecli devices` (if empty, then `adb devices` / `xcrun simctl list devices booted`) | All empty: Android `adb kill-server && adb start-server` to self-recover once; iOS simulator `xcrun simctl boot <udid>`; still empty = **physically disconnected/not started, only then stop** |
-| **mobilecli** (interaction base) | `mobilecli --version` | Missing → `npm i -g mobilecli@latest` (or `npx mobilecli@latest` / build from source `make build`). Usable as soon as installed, **no MCP/restart needed** |
+| **mobilecli** (interaction base) | `mobilecli --version` | Missing → `npm i -g mobilecli@latest`; **if npm won't install it, switch channel** (it's a Go binary with prebuilt artifacts on GitHub Releases — see `references/restricted-network.md`). Usable as soon as installed, **no MCP/restart needed** |
 | **mobile-mcp** (MCP version, optional) | `claude mcp list \| grep -i mobile` | Missing → `claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest` (**changing MCP config = only connects next session**; for this session use mobilecli to cover, don't fall back to blind-tap because of it) |
 | **patrol_cli** | `patrol --version` | Missing → `dart pub global activate patrol_cli`; installed but reports not found → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
 | Project Patrol config | pubspec has `patrol` dev_dep + `patrol:` section + `integration_test/` | Missing → `flutter pub add patrol --dev` + add the `patrol:` section + Android `androidTest` scaffold. A one-time project-level investment, **install it and continue** |
@@ -51,6 +51,10 @@ One-shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, id
 **Red lines (denied by default — unlocked only by explicit upfront user authorization)**: ① device physically disconnected/unplugged — a physical blocker: self-recover once, still failing → stop and report; ② operations that spend real money or affect real users (payments/charges/transfers/orders; on-chain transactions for blockchain apps); ③ secret/credential operations (production keys/signing certs/user credentials/private keys & mnemonics); ④ irreversible destruction (deleting data/changing production). ②③④ are **never done by default**; the only unlock is **explicit upfront authorization from the user** — in this run's instructions, or in the project `CLAUDE.md`'s `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` stating which class and what scope (e.g. "sandbox payments may place orders", "testnet transactions allowed") — and only within the stated scope. When not authorized: an interactive session may pause and ask once; **unattended, never ask and wait — skip the item, mark "authorization needed: <operation>" in the report, move on**. "The test needs it" is never authorization. Project-specific red lines added via `{{IRREVERSIBLE_REDLINES}}` carry the same force.
 
 **Green zone (everything outside the red lines)**: installing tools, changing local config, adding dependencies, scaffolding tests, booting/stopping simulators, installing WDA/agent — reversible, low-risk, **finish them yourself and keep going**; don't treat "the tool isn't installed" as a reason to stop. Every later mention of "green zone" means this.
+
+**When something won't install, first tell a "channel" problem from a "permission" one**:
+- **Channel problem** (a package source is blocked — typically a corporate gateway intercepting npm): **still green zone** — the green zone is defined by the goal, not the channel, so switch routes and keep going. `bash scripts/bootstrap.sh` already falls back to GitHub Releases automatically; the manual steps and traps → `references/restricted-network.md`.
+- **Permission problem** (only a human can grant it in a GUI: macOS Accessibility, "Allow USB debugging" on the device, iOS Developer Mode, the `xcode-select --install` prompt): **genuinely stop**, same tier as a physically disconnected device. Interactive may ask once; unattended, skip it and write "manual authorization needed: <where to click what>" in the report, then move on.
 
 ---
 
@@ -101,7 +105,7 @@ mobilecli screenshot --device "$D" -o "$SHOT"           # screenshot → Read to
 
 **Flutter locator priority (most stable to most fragile)**: Patrol `Key` (most stable for regression) > `Semantics` label exact > role/`button:true` flag > label substring/regex > plain text > blind-tap coordinates (last resort).
 
-Key points: take coordinates from the `dump ui` rect center, **don't blind-guess**; verify each step with `screenshot`+Read, tapped wrong → `io button BACK` to go back; Flutter's **self-drawn numeric keypad/custom gesture widgets are not system input fields**, `io text` won't feed into them → tap each key coordinate one by one with `io tap`; a widget that won't list = no Semantics exposed → **go back and fix the code** (below), don't make do with blind-tap. Deep-link jump: `mobilecli device url <deeplink>` reaches the page directly, saving level-by-level navigation.
+Key points: take coordinates from the `dump ui` rect center, **don't blind-guess**; verify each step with `screenshot`+Read, tapped wrong → `io button BACK` to go back; Flutter's **self-drawn numeric keypad/custom gesture widgets are not system input fields**, `io text` won't feed into them → tap each key coordinate one by one with `io tap`; **a WDA-synthesised `io longpress` may not register on the Flutter side** (e.g. a long press on a `GestureDetector` in the AppBar title) — don't fight it, apply the same "won't list = fix it in code" principle below and replace the hidden gesture with a tappable control carrying `Semantics`, which improves manual testing too; a widget that won't list = no Semantics exposed → **go back and fix the code** (below), don't make do with blind-tap. Deep-link jump: `mobilecli device url <deeplink>` reaches the page directly, saving level-by-level navigation.
 
 ---
 
@@ -217,6 +221,7 @@ mobilecli apps terminate --device <id> <packageName>      # 2) actually close th
 - **Android details** → `references/android.md` (adb path/wm size/dumpsys/logcat/network-cut testing & recovery, platform last resort)
 - **Offline test layer** → `references/offline-test-layer.md` (four fixture strategies)
 - **Tool selection** → `references/tool-decision-tree.md` (when to use mobilecli/mobile-mcp/mobilewright/Patrol)
+- **Restricted network/permissions** → `references/restricted-network.md` (backup channels when a corporate gateway blocks npm, the macOS exec-bit and quarantine traps, which blockers only a human can clear)
 - **Scaling / unattended** → `references/scaling.md` (trust ladder, worktree/sub-agent/workflow parallelism, /schedule·/loop)
 - **Project rollout**: `templates/` (CLAUDE.md constitution template + `.claude/settings.json` permission allowlist + format/analyze hook + `.claude/commands/{spec,verify,ship,debug,nightly}.md`). One-shot install: `bash setup-project.sh <project root>` (see README).
 

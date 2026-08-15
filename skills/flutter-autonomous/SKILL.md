@@ -39,7 +39,7 @@ description: Flutter 真机/模拟器自主运行与自动化测试验证(iOS + 
 | 检查 | 命令 | 缺了怎么办(自己做) |
 |---|---|---|
 | 设备在线 | `mobilecli devices`(空再 `adb devices` / `xcrun simctl list devices booted`) | 都空:Android `adb kill-server && adb start-server` 自救一次;iOS 模拟器 `xcrun simctl boot <udid>`;仍空=**物理掉线/没起,才停** |
-| **mobilecli**(交互底座) | `mobilecli --version` | 缺 → `npm i -g mobilecli@latest`(或 `npx mobilecli@latest` / 源码 `make build`)。已装即用,**无需 MCP/重启** |
+| **mobilecli**(交互底座) | `mobilecli --version` | 缺 → `npm i -g mobilecli@latest`;**npm 装不上就换渠道**(它是 Go 二进制,GitHub Releases 有现成产物,见 `references/restricted-network.md`)。已装即用,**无需 MCP/重启** |
 | **mobile-mcp**(MCP 版,可选) | `claude mcp list \| grep -i mobile` | 缺 → `claude mcp add mobile-mcp -- npx -y @mobilenext/mobile-mcp@latest`(**改 MCP 配置=下次会话才连**;本会话先用 mobilecli 顶,别因此退回盲点) |
 | **patrol_cli** | `patrol --version` | 缺 → `dart pub global activate patrol_cli`;装了报 not found → `export PATH="$PATH:$HOME/.pub-cache/bin"` |
 | 项目 Patrol 配置 | pubspec 有 `patrol` dev_dep + `patrol:` 段 + `integration_test/` | 缺 → `flutter pub add patrol --dev` + 补 `patrol:` 段 + Android `androidTest` 脚手架。项目级一次性投入,**装好继续** |
@@ -51,6 +51,10 @@ description: Flutter 真机/模拟器自主运行与自动化测试验证(iOS + 
 **红线(默认禁止,用户事先明确授权才做)**:① 设备物理掉线/没插——物理阻塞,自救一次仍失败才停下报告;② 花真钱/影响真实用户的操作(支付/扣费/转账/下单;区块链 App 的上链交易同理);③ 密钥/凭证操作(生产密钥/签名证书/用户凭证/私钥助记词);④ 不可逆破坏(删数据/改生产)。②③④ **默认一律不做**,唯一解锁方式是用户**事先明确授权**——本次指令说明,或项目 `CLAUDE.md` 的 `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` 写明允许哪类、什么范围(如「沙箱支付可下单」「测试链可发交易」),且只做写明的范围。未授权时:交互会话可停下问一句;**无人值守不问不等——跳过该项、报告标注「需授权:<操作>」,继续下个任务**。绝不把「测试需要」当授权。项目特有红线在 `{{IRREVERSIBLE_REDLINES}}` 里补充,同等效力。
 
 **绿区(红线之外的一切)**:装工具、改本地配置、补依赖、scaffold 测试、起停模拟器、装 WDA/agent——可逆、低风险,**自己做完接着干**,别把"工具没装好"当停下理由。全文再提「绿区」都指这一条。
+
+**装不上时先分清「渠道」还是「权限」**:
+- **渠道问题**(包管理源被挡,典型是企业网关拦 npm):**仍在绿区**——绿区看的是「目标」不是「渠道」,换条路继续。`bash scripts/bootstrap.sh` 已内置 GitHub Releases 自动回退;手动做法与坑 → `references/restricted-network.md`。
+- **权限问题**(只有人在 GUI 里能给:macOS 辅助功能、设备「允许 USB 调试」、iOS 开发者模式、`xcode-select --install` 弹窗):**真停**,和设备物理掉线同级。交互可问一句;无人值守跳过并在报告写明「需人工授权:在哪点什么」,继续下个任务。
 
 ---
 
@@ -101,7 +105,7 @@ mobilecli screenshot --device "$D" -o "$SHOT"           # 截图 → Read 核验
 
 **Flutter 定位优先级(由稳到脆)**:Patrol `Key`(回归最稳) > `Semantics` label 精确 > role/`button:true` 标志 > label 子串/正则 > 纯文本 > 盲点坐标(末选)。
 
-要点:坐标取 `dump ui` rect 中心**不盲猜**;每步 `screenshot`+Read 核验,点错 `io button BACK` 退回;Flutter **自绘数字键盘/自定义手势控件不是系统输入框**,`io text` 喂不进 → 逐个 `io tap` 键坐标;某控件列不出 = 没暴露 Semantics → **回代码补**(下),别将就盲点。深链跳关:`mobilecli device url <deeplink>` 直达页面,省逐级导航。
+要点:坐标取 `dump ui` rect 中心**不盲猜**;每步 `screenshot`+Read 核验,点错 `io button BACK` 退回;Flutter **自绘数字键盘/自定义手势控件不是系统输入框**,`io text` 喂不进 → 逐个 `io tap` 键坐标;**WDA 合成的 `io longpress` Flutter 侧可能不认**(如 AppBar 标题上的 `GestureDetector` 长按),别硬扛——按下面「列不出=回代码补」同一条原则,把隐藏手势换成有 `Semantics` 的可点控件,顺带人工测试也更好用;某控件列不出 = 没暴露 Semantics → **回代码补**(下),别将就盲点。深链跳关:`mobilecli device url <deeplink>` 直达页面,省逐级导航。
 
 ---
 
@@ -217,6 +221,7 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 - **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/断网测试与恢复,平台末选)
 - **离线测试层** → `references/offline-test-layer.md`(fixture 四策略)
 - **工具选型** → `references/tool-decision-tree.md`(mobilecli/mobile-mcp/mobilewright/Patrol 何时用)
+- **受限网络/权限** → `references/restricted-network.md`(npm 被企业网关拦时的备用渠道、macOS 执行位与 quarantine、哪些卡点只能人给)
 - **规模化/无人值守** → `references/scaling.md`(信任阶梯、worktree/子代理/workflow 并行、/schedule·/loop)
 - **项目落地**:`templates/`(CLAUDE.md 宪法模板 + `.claude/settings.json` 权限白名单+format/analyze hook + `.claude/commands/{spec,verify,ship,debug,nightly}.md`)。一键装:`bash setup-project.sh <项目根>`(见 README)。
 
