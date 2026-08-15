@@ -1,55 +1,61 @@
 #!/usr/bin/env bash
-# tap-by-label.sh — 按 label 子串一步点中心(弥补 mobilecli/mobile-mcp 只有坐标级 io tap、
-# 没有"按 label 一步点"原生命令的缺口)。零依赖,只用 mobilecli + jq。
+# tap-by-label.sh — tap the center of an element by label substring, in one step (filling the
+# gap where mobilecli/mobile-mcp only offer coordinate-level `io tap` and have no native
+# "tap by label" command). Zero dependencies beyond mobilecli + jq.
 #
-# 用法:
+# Usage:
 #   tap-by-label.sh <deviceId> <labelSubstring> [--index N] [--dump-only]
 #
-# 参数:
-#   <deviceId>        mobilecli devices 里的设备 id(脚本不写死设备,运行期传入)
-#   <labelSubstring>  要匹配的子串;对每个节点的 identifier / label / text / name 任一做"包含"(不区分大小写)
-#                     首选传 identifier(Semantics(identifier:) 那个稳定 id),它不随文案/语言变
-#   --index N         多个匹配时点第 N 个(0 起;默认 0)
-#   --dump-only       只列出所有匹配(label + 中心坐标),不点 —— 先检视再决定点谁
+# Arguments:
+#   <deviceId>        device id from `mobilecli devices` (the script hardcodes no device; pass it at runtime)
+#   <labelSubstring>  substring to match; tested as "contains" (case-insensitive) against each node's
+#                     identifier / label / text / name
+#                     Prefer passing an identifier (the stable id from Semantics(identifier:)) — it does
+#                     not change when the copy or the language changes
+#   --index N         tap the Nth match when there are several (0-based; default 0)
+#   --dump-only       only list every match (label + center coordinates) without tapping — look first, then decide
 #
-# 逻辑:
-#   1) mobilecli dump ui --device "$D" --format json 拿 ScreenElement 树
-#      节点结构:{type,label?,text?,name?,value?,placeholder?,identifier?,
-#                rect:{x,y,width,height 整数物理像素},children:[]}
-#   2) jq 递归 recurse(.children[]?),匹配 label/text/name 任一含子串(忽略大小写),
-#      算中心 (rect.x + rect.width/2, rect.y + rect.height/2)
-#   3) 匹配结果按 rect 面积**升序**排 —— Semantics 合并后祖先容器的 label 天然包含子串,
-#      而 jq 的 `..` 是前序遍历(父先于子),不排序的话 [0] 常常是整行/整个 Card,
-#      点下去落在容器空白处 = "点了没反应"。面积最小的那个才最可能是你要的叶子控件。
-#   4) --dump-only 只列;否则点第 --index 个匹配:mobilecli io tap --device "$D" <cx>,<cy>
+# How it works:
+#   1) `mobilecli dump ui --device "$D" --format json` returns the ScreenElement tree
+#      node shape: {type,label?,text?,name?,value?,placeholder?,identifier?,
+#                   rect:{x,y,width,height — integer physical pixels},children:[]}
+#   2) jq recurses through recurse(.children[]?), matching any of label/text/name containing the
+#      substring (case-insensitive), and computes the center (rect.x + rect.width/2, rect.y + rect.height/2)
+#   3) Matches are sorted by rect area **ascending** — after Semantics merging, an ancestor container's
+#      label naturally contains the substring too, and jq's `..` is a pre-order traversal (parent before
+#      child), so without sorting [0] is very often the whole row / whole Card; tapping that lands on
+#      blank space inside the container = "the tap did nothing". The smallest one is the leaf widget you meant.
+#   4) --dump-only just lists; otherwise it taps match number --index: mobilecli io tap --device "$D" <cx>,<cy>
 #
-# 注意:输出的 TSV 把坐标放前、label 垫底并用 @tsv 转义 —— Flutter 的 Semantics 合并
-#      经常产出**带换行的 label**(如 "SOL\n$123.45\n+2.3%"),label 在首列且不转义时
-#      会把一行撑成多行,导致行数错乱、读到空坐标、点到 (0,0)。
+# Note: the emitted TSV puts the coordinates first and the label last, escaped through @tsv — Flutter's
+#      Semantics merging frequently produces **labels containing newlines** (e.g. "SOL\n$123.45\n+2.3%"),
+#      and an unescaped label in the first column blows one row into several, wrecking the line count,
+#      reading back empty coordinates and tapping (0,0).
 #
-# 退出码:0 成功;1 用法错;2 缺依赖(jq/mobilecli);3 dump 失败;4 无匹配;5 --index 越界
+# Exit codes: 0 success; 1 usage error; 2 missing dependency (jq/mobilecli); 3 dump failed;
+#             4 no match; 5 --index out of range
 
 set -euo pipefail
 
 usage() {
   cat >&2 <<'EOF'
-用法: tap-by-label.sh <deviceId> <labelSubstring> [--index N] [--dump-only]
+Usage: tap-by-label.sh <deviceId> <labelSubstring> [--index N] [--dump-only]
 
-  <deviceId>        mobilecli devices 里的设备 id
-  <labelSubstring>  匹配子串,对 identifier/label/text/name 任一做"包含"(不区分大小写)
-                    首选 identifier —— 它不随文案/语言变,label 会
-  --index N         多个匹配时点第 N 个(0 起;默认点第 0 个)
-  --dump-only       只列出所有匹配(label + 中心坐标),不点
+  <deviceId>        device id from `mobilecli devices`
+  <labelSubstring>  substring matched as "contains" (case-insensitive) against identifier/label/text/name
+                    prefer an identifier — it survives copy and language changes, a label does not
+  --index N         tap the Nth match when there are several (0-based; defaults to 0)
+  --dump-only       only list every match (label + center coordinates), without tapping
 
-示例:
-  tap-by-label.sh <deviceId> "提交"                 # 点第一个含"提交"的控件
-  tap-by-label.sh <deviceId> "Buy" --dump-only      # 先看有哪些匹配
-  tap-by-label.sh <deviceId> "Buy" --index 1        # 点第 2 个匹配
+Examples:
+  tap-by-label.sh <deviceId> "Submit"               # tap the first widget containing "Submit"
+  tap-by-label.sh <deviceId> "Buy" --dump-only      # see what matches first
+  tap-by-label.sh <deviceId> "Buy" --index 1        # tap the 2nd match
 EOF
   exit 1
 }
 
-# ---- 解析参数 ----------------------------------------------------------------
+# ---- Parse arguments ---------------------------------------------------------
 DEVICE=""
 NEEDLE=""
 INDEX=0
@@ -59,7 +65,7 @@ POSITIONAL=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --index)
-      [ $# -ge 2 ] || { echo "错误: --index 需要一个数值参数" >&2; usage; }
+      [ $# -ge 2 ] || { echo "Error: --index requires a numeric argument" >&2; usage; }
       INDEX="$2"; shift 2 ;;
     --index=*)
       INDEX="${1#*=}"; shift ;;
@@ -68,57 +74,60 @@ while [ $# -gt 0 ]; do
     -h|--help)
       usage ;;
     --*)
-      echo "错误: 未知选项 '$1'" >&2; usage ;;
+      echo "Error: unknown option '$1'" >&2; usage ;;
     *)
       POSITIONAL+=("$1"); shift ;;
   esac
 done
 
-# 位置参数:deviceId + labelSubstring(都必填)
-[ "${#POSITIONAL[@]}" -ge 2 ] || { echo "错误: 缺少 <deviceId> 或 <labelSubstring>" >&2; usage; }
+# Positional arguments: deviceId + labelSubstring (both required)
+[ "${#POSITIONAL[@]}" -ge 2 ] || { echo "Error: missing <deviceId> or <labelSubstring>" >&2; usage; }
 DEVICE="${POSITIONAL[0]}"
 NEEDLE="${POSITIONAL[1]}"
 
-# --index 必须是非负整数
+# --index must be a non-negative integer
 case "$INDEX" in
-  ''|*[!0-9]*) echo "错误: --index 需为非负整数,收到 '$INDEX'" >&2; usage ;;
+  ''|*[!0-9]*) echo "Error: --index must be a non-negative integer, got '$INDEX'" >&2; usage ;;
 esac
 
-# ---- 依赖检查 ----------------------------------------------------------------
+# ---- Dependency checks -------------------------------------------------------
 if ! command -v jq >/dev/null 2>&1; then
-  echo "错误: 未找到 jq —— 本脚本靠 jq 解析 dump ui 的 JSON。" >&2
+  echo "Error: jq not found — this script relies on jq to parse the dump ui JSON." >&2
   echo "  macOS:  brew install jq" >&2
-  echo "  Linux:  apt install jq   (或 yum/dnf/apk 对应包)" >&2
+  echo "  Linux:  apt install jq   (or the yum/dnf/apk equivalent)" >&2
   exit 2
 fi
 if ! command -v mobilecli >/dev/null 2>&1; then
-  echo "错误: 未找到 mobilecli —— 交互底座缺失。" >&2
-  echo "  装: npm i -g mobilecli@latest   (或 npx mobilecli@latest)" >&2
+  echo "Error: mobilecli not found — the interaction base is missing." >&2
+  echo "  Install: npm i -g mobilecli@latest   (or npx mobilecli@latest)" >&2
   exit 2
 fi
 
-# ---- 抓 UI 树 ----------------------------------------------------------------
-# dump ui --format json:整棵 ScreenElement 树,rect 为整数物理像素
+# ---- Grab the UI tree --------------------------------------------------------
+# dump ui --format json: the whole ScreenElement tree, rect in integer physical pixels
 UI_JSON="$(mobilecli dump ui --device "$DEVICE" --format json 2>/dev/null)" || {
-  echo "错误: mobilecli dump ui 失败 —— 设备 '$DEVICE' 是否在线/前台是否为目标 App?" >&2
-  echo "  自查: mobilecli devices   /   mobilecli apps foreground --device '$DEVICE'" >&2
+  echo "Error: mobilecli dump ui failed — is device '$DEVICE' online, and is the target app in the foreground?" >&2
+  echo "  Check with: mobilecli devices   /   mobilecli apps foreground --device '$DEVICE'" >&2
   exit 3
 }
 if [ -z "$UI_JSON" ]; then
-  echo "错误: dump ui 返回空 —— 设备 '$DEVICE' 可能离线或无前台 App。" >&2
+  echo "Error: dump ui returned nothing — device '$DEVICE' may be offline or have no foreground app." >&2
   exit 3
 fi
 
-# ---- 递归匹配 + 算中心 -------------------------------------------------------
-# 输出每个匹配一行 TSV: <cx>\t<cy>\t<area>\t<label>
-#   坐标在前、label 垫底:label 里的换行/制表符不会再撑乱行结构(再叠 @tsv 转义 + 折叠空白)
-#   label 取 label / text / name / identifier 第一个非空者(纯展示用)
-#   匹配规则:identifier/label/text/name 任一(转小写)包含 needle(转小写)
-#     ★ identifier = Flutter `Semantics(identifier:)`(3.19+),映射到 Android resource-id /
-#       iOS accessibilityIdentifier。它是**给自动化的稳定 id,不随文案与语言变**,
-#       而 label 是给人读的可见文案——多语言项目里按 label 定位一改文案就碎。有 identifier 就优先传它。
-#   中心: x + width/2, y + height/2(整数取整,贴近 mobilecli io tap 的像素语义)
-#   排序: 按 rect 面积升序 —— 最小的最可能是叶子控件,而非包含它的行/卡片容器
+# ---- Recursive match + center calculation ------------------------------------
+# Emits one TSV line per match: <cx>\t<cy>\t<area>\t<label>
+#   Coordinates first, label last: newlines/tabs inside a label can no longer break the row structure
+#   (on top of @tsv escaping + whitespace folding)
+#   label = the first non-empty of label / text / name / identifier (display only)
+#   Match rule: any of identifier/label/text/name (lowercased) contains the needle (lowercased)
+#     ★ identifier = Flutter `Semantics(identifier:)` (3.19+), mapped to Android resource-id /
+#       iOS accessibilityIdentifier. It is **a stable id meant for automation and does not change with
+#       copy or language**, whereas label is the human-visible text — in a multi-language project,
+#       locating by label breaks the moment the copy changes. If an identifier exists, pass that.
+#   Center: x + width/2, y + height/2 (floored, matching mobilecli io tap's pixel semantics)
+#   Sort: by rect area ascending — the smallest is most likely the leaf widget rather than the
+#         row/card container wrapping it
 MATCHES="$(printf '%s' "$UI_JSON" | jq -r --arg needle "$NEEDLE" '
   ($needle | ascii_downcase) as $q
   | [ .. | objects | select(has("rect"))
@@ -127,7 +136,7 @@ MATCHES="$(printf '%s' "$UI_JSON" | jq -r --arg needle "$NEEDLE" '
           | map(ascii_downcase) ) as $hay
       | select( any($hay[]; contains($q)) )
       | {
-          label: ( ($n.label // $n.text // $n.name // $n.identifier // "(无 label)")
+          label: ( ($n.label // $n.text // $n.name // $n.identifier // "(no label)")
                    | tostring | gsub("\\s+"; " ") ),
           cx:   ( ($n.rect.x + ($n.rect.width  / 2)) | floor ),
           cy:   ( ($n.rect.y + ($n.rect.height / 2)) | floor ),
@@ -138,64 +147,65 @@ MATCHES="$(printf '%s' "$UI_JSON" | jq -r --arg needle "$NEEDLE" '
   | .[]
   | [ .cx, .cy, .area, .label ] | @tsv
 ')" || {
-  echo "错误: jq 解析 dump ui 输出失败(JSON 结构异常?)" >&2
+  echo "Error: jq failed to parse the dump ui output (unexpected JSON shape?)" >&2
   exit 3
 }
 
-# 无匹配 —— 给出最可能的根因(没暴露 Semantics / 纯 canvas),引导回代码补
+# No match — name the most likely root causes (no Semantics exposed / pure canvas) and point back at the code
 if [ -z "$MATCHES" ]; then
-  echo "未找到含 '$NEEDLE' 的元素。" >&2
-  echo "可能原因:" >&2
-  echo "  1) 该控件没暴露 Semantics —— 自定义手势控件(Touchable/GestureDetector/InkWell)" >&2
-  echo "     默认 dump 不出,需显式包 Semantics(label: ..., button: true)。" >&2
-  echo "  2) 纯 canvas 绘制(图表内部等),无 Semantics 包裹 —— 回代码补 Semantics(label:)," >&2
-  echo "     或对这种节点退回截图量坐标盲点(末选)。" >&2
-  echo "  3) 子串拼写/大小写无关但内容不符 —— 先全量检视:" >&2
+  echo "No element containing '$NEEDLE' was found." >&2
+  echo "Likely causes:" >&2
+  echo "  1) The widget exposes no Semantics — custom gesture widgets (Touchable/GestureDetector/InkWell)" >&2
+  echo "     do not show up in a dump by default; wrap them explicitly in Semantics(label: ..., button: true)." >&2
+  echo "  2) Pure canvas painting (inside a chart, etc.) with no Semantics wrapper — go back to the code and add" >&2
+  echo "     Semantics(label:), or fall back to measuring coordinates from a screenshot for such nodes (last resort)." >&2
+  echo "  3) Spelling is off (case does not matter, content does) — list everything first:" >&2
   echo "       mobilecli dump ui --device '$DEVICE' --format json | jq -r '.. | objects | select(has(\"rect\")) | [.identifier, .label, .text, .name] | map(select(. != null)) | @tsv'" >&2
   exit 4
 fi
 
-# 统计匹配数
+# Count the matches
 COUNT="$(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ')"
 
-# ---- --dump-only: 只列不点 ---------------------------------------------------
+# ---- --dump-only: list without tapping ---------------------------------------
 if [ "$DUMP_ONLY" -eq 1 ]; then
-  echo "含 '$NEEDLE' 的匹配($COUNT 个,按面积升序,索引 0 起):"
+  echo "Matches containing '$NEEDLE' ($COUNT, by ascending area, 0-based index):"
   i=0
   while IFS=$'\t' read -r cx cy area label; do
-    printf '  [%d] %-40s 中心=(%s,%s) 面积=%s\n' "$i" "$label" "$cx" "$cy" "$area"
+    printf '  [%d] %-40s center=(%s,%s) area=%s\n' "$i" "$label" "$cx" "$cy" "$area"
     i=$((i + 1))
   done <<< "$MATCHES"
-  echo "提示: 面积大的多半是包住目标的行/卡片容器,点它会落在空白处;用 --index N 点指定项(默认点 [0]=最小的那个)。" >&2
+  echo "Hint: the large ones are usually the row/card container wrapping your target — tapping them lands on blank space. Use --index N to pick one (the default taps [0] = the smallest)." >&2
   exit 0
 fi
 
-# ---- 选中目标 + 越界检查 -----------------------------------------------------
+# ---- Select the target + range check -----------------------------------------
 if [ "$INDEX" -ge "$COUNT" ]; then
-  echo "错误: --index $INDEX 越界 —— 含 '$NEEDLE' 的匹配只有 $COUNT 个(有效索引 0..$((COUNT - 1)))。" >&2
-  echo "  先看全部: tap-by-label.sh '$DEVICE' '$NEEDLE' --dump-only" >&2
+  echo "Error: --index $INDEX is out of range — only $COUNT matches contain '$NEEDLE' (valid indices 0..$((COUNT - 1)))." >&2
+  echo "  See them all first: tap-by-label.sh '$DEVICE' '$NEEDLE' --dump-only" >&2
   exit 5
 fi
 
-# 多匹配且未显式指定 index —— 提示用 --index 精确选,本次默认点 [0](面积最小者)
+# Several matches and no explicit index — say so, and tap [0] (the smallest) this time
 if [ "$COUNT" -gt 1 ] && [ "$INDEX" -eq 0 ]; then
-  echo "警告: 含 '$NEEDLE' 的匹配有 $COUNT 个,本次默认点面积最小的第 [0] 个;若不对请用 --index N 精确选(--dump-only 先看全部)。" >&2
+  echo "Warning: $COUNT matches contain '$NEEDLE'; tapping the smallest one, [0], by default. If that is wrong, pick with --index N (use --dump-only to see them all first)." >&2
 fi
 
-# 取第 INDEX 行(sed 行号 1 起,故 +1)
+# Take line INDEX (sed line numbers start at 1, hence +1)
 TARGET_LINE="$(printf '%s\n' "$MATCHES" | sed -n "$((INDEX + 1))p")"
 IFS=$'\t' read -r CX CY AREA LABEL <<< "$TARGET_LINE"
 
-# 坐标兜底校验:任何一步把行结构搞乱都会在这里被拦下,而不是静默点到 (0,0)
+# Coordinate sanity check: anything that mangled the row structure gets caught here,
+# instead of silently tapping (0,0)
 for v in "${CX:-}" "${CY:-}"; do
   case "$v" in
-    ''|*[!0-9]*) echo "错误: 解析到的坐标非法(cx='${CX:-}' cy='${CY:-}',原始行: $TARGET_LINE)。" >&2; exit 3 ;;
+    ''|*[!0-9]*) echo "Error: parsed coordinates are invalid (cx='${CX:-}' cy='${CY:-}', raw line: $TARGET_LINE)." >&2; exit 3 ;;
   esac
 done
 
-# ---- 点击 + 取证回显 ---------------------------------------------------------
+# ---- Tap + echo the evidence -------------------------------------------------
 mobilecli io tap --device "$DEVICE" "$CX,$CY" >/dev/null || {
-  echo "错误: mobilecli io tap 失败(设备 '$DEVICE',坐标 $CX,$CY)。" >&2
+  echo "Error: mobilecli io tap failed (device '$DEVICE', coordinates $CX,$CY)." >&2
   exit 3
 }
-echo "已点击 [索引 $INDEX] label='$LABEL' 坐标=($CX,$CY) 面积=$AREA 设备='$DEVICE'"
+echo "Tapped [index $INDEX] label='$LABEL' center=($CX,$CY) area=$AREA device='$DEVICE'"
