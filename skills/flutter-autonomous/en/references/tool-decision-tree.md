@@ -36,37 +36,26 @@ Implications:
 
 **Why default**: once installed it's just a binary, **does not depend on MCP registration, needs no session restart** — usable immediately after install; the coordinate-level `dump ui` → `io tap` loop is the shortest, ideal for "tap it yourself, look yourself, keep moving smoothly".
 
-### Command-surface quick reference
+### Command surface: only the parts the environment can't tell you
 
-| Domain | Command | Purpose |
-|---|---|---|
-| **devices** | `mobilecli devices` / `--include-offline` | List online devices (JSON); add `--include-offline` to include unbooted simulators/emulators |
-| **device** | `device boot` / `device shutdown` | Boot / shut down simulator·emulator |
-| | `device reboot` | Reboot device |
-| | `device info` | Device info |
-| | `device orientation` | Read/set orientation |
-| | `device crashes list` / `crashes get <id>` | List crash reports / get a stack trace (iOS real device via crashreport service; simulator reads DiagnosticReports; Android parses `logcat -b crash`) |
-| | `device url <deeplink>` | Open deeplink / custom scheme — **deep-link jumps to a screen**, saving step-by-step navigation |
-| **apps** | `apps launch <bundleId>` | Bring App to foreground |
-| | `apps terminate <bundleId>` | Truly close App (Android=force-stop / iOS=simctl terminate, already smoothed over) |
-| | `apps foreground` | **Current foreground App** (cross-talk check: is `packageName` == target package) |
-| | `apps list` | List installed Apps |
-| | `apps install <path>` / `apps uninstall <bundleId>` | Install (.apk/.ipa/.zip) / uninstall |
-| | `apps path <bundleId>` | App data container path (Android) |
-| **io** | `io tap x,y` | Tap coordinate (take the center of the `dump ui` rect, don't blind-guess) |
-| | `io longpress x,y [--duration ms]` | Long press |
-| | `io swipe x1,y1,x2,y2` | Swipe / list scroll / pull-to-refresh / drag slider |
-| | `io text 'text'` | Type into a system input field (Flutter's self-drawn keyboard won't accept it; tap key-by-key with `io tap`) |
-| | `io keys` | Send a key sequence |
-| | `io button <HOME\|BACK\|POWER\|VOLUME_UP\|...>` | Hardware key (**BACK / DPAD Android only**; iOS has no BACK — use gestures/nav-bar tap) |
-| | `io gesture` | Custom gesture |
-| **dump ui** | `dump ui` | List elements: label + **device-pixel rect{x,y,width,height}**; dump and inspect before interacting |
-| **screenshot** | `screenshot [-o file\|-]` / `--format jpeg --quality N` | Screenshot → Read to verify; `-o -` outputs to stdout |
-| **fs** | `fs ls / pull / push / mkdir [-p] / rm [-r]` | Device/container file read/write (**Android + iOS simulator**; `/data/user/` requires app to be debuggable) |
-| **webview** | `webview list / goto / reload / back / forward / url / title / content / query <css> / eval <js> / wait` | Inspect and operate embedded webviews (**query/eval act only on webview DOM, not on native/Flutter widgets**) |
-| **agent** | `agent status / install [--force] [--provisioning-profile]` | On-device agent (**required for iOS touch/stream/UI tree**; on Android only needed for non-ASCII input) |
-| **server** | `server start [--listen :12000]` | Start HTTP `/rpc` + WS `/ws`, cache & keep-alive, speed up repeated interaction |
-| **remote** | `remote allocate / list-devices / release` | Cloud devices (device lab) |
+**For the full command surface run `mobilecli --help` / `mobilecli <domain> --help`** — that's the one source that never goes stale. Listed here are only the traps and usages `--help` won't reveal:
+
+| Command | What `--help` won't tell you |
+|---|---|
+| `devices` | Output is JSON `{status,data:{devices:[…]}}`, take `.data.devices[0].id`; only `--include-offline` includes unbooted simulators |
+| `device crashes list` / `crashes get <id>` | The entry point for failure classification: read the first `package:<your_app>/` line of the stack. Three different backends (iOS device crashreport service / simulator DiagnosticReports / Android `logcat -b crash`), already smoothed over |
+| `device url <deeplink>` | **Deep-link jump** — lands directly on a screen, skipping step-by-step navigation; the most underrated command here |
+| `apps terminate` | Android=force-stop / iOS=simctl terminate, already smoothed over. **`kill flutter run` is not this** |
+| `apps foreground` | **Cross-talk check**: the returned `packageName` must equal the target package — check before screenshotting/tapping |
+| `apps path <bundleId>` | **Android only**; on iOS this is the only way to a container path, there is no arbitrary-path `fs` |
+| `io tap x,y` | Take the center of the `dump ui` rect — **never blind-guess, never hardcode historical coordinates** |
+| `io text 'text'` | System input fields only. **Flutter's self-drawn keyboard / custom gesture widgets won't accept it** → tap key-by-key; non-ASCII on Android needs the on-device agent first |
+| `io button <KEY>` | **BACK / DPAD are Android only**; iOS has no BACK — use a gesture or tap the nav-bar back control |
+| `dump ui` | Returns **device physical pixel** rects, usable as-is with no conversion; on iOS stderr carries heavy tunnel logging — **never write `2>&1`**, it corrupts the JSON |
+| `fs ls/pull/push/rm` | **Android + iOS simulator only**; `/data/user/` requires the app to be debuggable |
+| `webview query <css>` / `eval <js>` | **Acts only on webview DOM** — not on native widgets, and certainly not on Flutter's Semantics tree (the most common misconception; see the end of this doc) |
+| `agent install [--provisioning-profile]` | **Required for iOS touch/stream/UI tree**; on Android only for non-ASCII input. For a real device just pass the app's own `embedded.mobileprovision` |
+| `server start [--listen :12000]` | Starts HTTP `/rpc` + WS `/ws` — **caches and keeps tunnels alive, markedly faster for repeated interaction**; worth starting when you'll hit the same device many times |
 
 > Almost every command takes `--device <id>`; the device id is **fetched live at runtime from `mobilecli devices`, never written into a file**.
 

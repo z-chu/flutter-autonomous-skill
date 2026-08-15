@@ -30,7 +30,7 @@ ADB="$(adb_bin)"
 
 - 两个环境变量都试：新工程多用 `ANDROID_HOME`，老工程可能只有 `ANDROID_SDK_ROOT`。
 - 兜底裸 `adb`：用户可能用 Homebrew / 包管理器装的 platform-tools，已在 PATH。
-- 真找不到属于「补工具」范畴（可逆低风险）——自己装 platform-tools 后回验 `"$ADB" --version`，别停下要人工。
+- 真找不到属于**绿区**（keystone §2）——自己装 platform-tools 后回验 `"$ADB" --version`，别停下要人工。
 
 ---
 
@@ -168,7 +168,7 @@ Flutter 的 `print`/`debugPrint` 走 `I/flutter` tag：
 JDK / Gradle / Android SDK 版本是**项目特定**的，因机器/工程而异 → 放项目 `CLAUDE.md`，本文不写死。
 
 - 仅提一句排错锚点：`flutter run` / Gradle 构建报 `compileDebugJavaWithJavac` 失败，**最常见是 JDK 版本与工程要求不匹配**（Gradle 用了系统默认 JDK 而非工程要求的版本）。具体该用哪个 JDK、怎么指定（`org.gradle.java.home` / `JAVA_HOME`）从项目 `CLAUDE.md` 读。
-- 工具链报错属构建环境问题，按项目 `CLAUDE.md` 指定的版本修好再重跑，仍属可逆低风险自己处理。
+- 工具链报错属构建环境问题，按项目 `CLAUDE.md` 指定的版本修好再重跑，仍属**绿区**自己处理。
 
 ---
 

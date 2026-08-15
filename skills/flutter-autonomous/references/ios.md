@@ -212,7 +212,7 @@ Patrol 走 Dart VM 直连 widget 树按 `Key` 查找+断言，**不依赖 WDA �
 
 ## 6. 自举 iOS 检查项（缺则自己装/起，别停人工）
 
-进自主模式先跑这几条体检；对应 keystone §0 的"检测→缺则装→独立命令回验"。**装工具/起模拟器/装 WDA 都是可逆低风险，自己做完接着干**——只有"真机物理掉线、花真钱的操作、密钥凭证操作、不可逆破坏"才停/才需授权（keystone 红线：后三类默认禁止、仅事先明确授权才做）。
+进自主模式先跑这几条体检；对应 keystone §2 的"检测→缺则装→独立命令回验"。**装工具/起模拟器/装 WDA 全在绿区，自己做完接着干**——只有 keystone 四红线才停/才需授权。
 
 | 检查 | 命令 | 期望 / 缺了怎么办 |
 |---|---|---|
@@ -223,7 +223,7 @@ Patrol 走 Dart VM 直连 widget 树按 `Key` 查找+断言，**不依赖 WDA �
 | 真机：go-ios 在位（仅走 mobile-mcp 真机时） | `which ios` && `ios version` | 有路径且版本以 `v` 开头；缺 → `npm i -g go-ios` |
 | 真机：隧道（iOS 17+，走 mobile-mcp 时） | `curl -s localhost:60105` 或检查端口监听 | 端口在听；不通 → 用 go-ios 起隧道（mobilecli 自动起，无需手动） |
 
-> 跨平台一把梭：`npx mobilewright doctor --json` 覆盖 Node/mobilecli/Xcode/Simulators/agent/Java/ADB（keystone §0 提及），再叠 `flutter doctor`、`patrol --version`。
+> 跨平台一把梭：`npx mobilewright doctor --json` 覆盖 Node/mobilecli/Xcode/Simulators/agent/Java/ADB（keystone §2 提及），再叠 `flutter doctor`、`patrol --version`。
 
 ---
 

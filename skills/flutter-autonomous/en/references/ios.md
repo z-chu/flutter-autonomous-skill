@@ -212,7 +212,7 @@ Patrol connects directly to the widget tree via the Dart VM and finds+asserts by
 
 ## 6. Bootstrap iOS checklist (if missing, install/start it yourself, don't stop for a human)
 
-When entering autonomous mode, first run these health checks; they correspond to the keystone §0 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all reversible and low-risk — do it yourself and keep going** — only stop for "real device physically disconnected, real-money operations, secret/credential operations, irreversible destruction" (the keystone's red lines — the last three are denied by default and need explicit upfront authorization; a physically offline device is the one hard stop).
+When entering autonomous mode, first run these health checks; they correspond to the keystone §2 "detect → install if missing → verify with an independent command." **Installing tools / booting the simulator / installing WDA are all green zone — do it yourself and keep going** — only the keystone's four red lines stop you or need authorization.
 
 | Check | Command | Expected / what to do if missing |
 |---|---|---|
@@ -223,7 +223,7 @@ When entering autonomous mode, first run these health checks; they correspond to
 | Real device: go-ios present (only for the mobile-mcp real-device path) | `which ios` && `ios version` | Has a path and the version starts with `v`; missing → `npm i -g go-ios` |
 | Real device: tunnel (iOS 17+, when going through mobile-mcp) | `curl -s localhost:60105` or check the port listening | The port is listening; not reachable → start the tunnel with go-ios (mobilecli starts it automatically, no manual step) |
 
-> One-shot cross-platform: `npx mobilewright doctor --json` covers Node/mobilecli/Xcode/Simulators/agent/Java/ADB (mentioned in keystone §0), then add `flutter doctor`, `patrol --version`.
+> One-shot cross-platform: `npx mobilewright doctor --json` covers Node/mobilecli/Xcode/Simulators/agent/Java/ADB (mentioned in keystone §2), then add `flutter doctor`, `patrol --version`.
 
 ---
 

@@ -5,35 +5,33 @@ compatibility: Requires Flutter SDK; Android via adb (mac/Linux); iOS via Xcode/
 metadata:
   author: z-chu
   version: "1.0.0"
-description: Autonomous Flutter on-device/simulator run & test verification (iOS + Android parity). Use for: running a Flutter app on a device/simulator to see it work, E2E/integration regression (Patrol by Key), fast offline fixture unit tests, screenshot visual verification, simulated taps/typing/swipes, log capture for diagnosis, packaging, or self-driving the implement→test→fix→commit loop. Flutter draws to a canvas and the accessibility tree is empty by default — once widgets expose a Semantics label, use mobilecli/mobile-mcp to list elements + device pixel coordinates and tap precisely (preferred, far better than blind-tap coordinates); iOS via WebDriverAgent/xcrun simctl, Android via adb, unified under mobilecli. If a tool/dependency is missing and you can install it yourself, do so and continue.
+description: Autonomous Flutter on-device/simulator run & test verification (iOS + Android parity). Use for: running a Flutter app on a device/simulator to see it work, simulated taps/typing/swipes, screenshot visual verification, log capture for diagnosis, E2E/integration regression (Patrol by Key), fast offline fixture unit tests, or self-driving the implement→test→fix→commit loop.
 ---
 
 # Autonomous Flutter Development & On-Device/Simulator Testing
 
 You are entering "autonomous Flutter development mode": run the requirements → implementation → testing → fixing → committing loop end-to-end unsupervised, until the task list is done or the retry cap is hit. The methodology lives in this doc and `references/`; **project-specific values (package name/device/dart-define/log anchors/toolchain/co-existing apps/business red lines) are always read from the project-root `CLAUDE.md`** — if there is none, bootstrap one from `templates/CLAUDE.md` (see §Portability). iOS and Android are at parity — the interaction base is unified under `mobilecli`, and platform differences are encapsulated in `references/{ios,android}.md`.
 
-> The English mirror lives in `en/SKILL.md` and `en/references/`; Chinese is the source of truth.
-
 ---
 
-## Step 1: Gather context before you start (the project-agnostic foundation)
+## 1. Gather context before you start (the project-agnostic foundation)
 
 Before doing anything, pin down "which project is this", **auto-detect, don't ask, don't hardcode**:
 
 - **applicationId** (Android) ← `applicationId` in `android/app/build.gradle(.kts)`
 - **bundleId** (iOS) ← `PRODUCT_BUNDLE_IDENTIFIER` in `ios/Runner.xcodeproj/project.pbxproj` (or the `patrol:` section of Flutter `pubspec.yaml`)
 - **Entry point / dart-defines** ← debug config in `.vscode/launch.json`, or the project `CLAUDE.md`
-- **Device** ← `mobilecli devices` at runtime (below); **never write a device id into any file**
+- **Device** ← fetched live from `mobilecli devices` after the §2 bootstrap; **never write a device id into any file**
 - **Log anchors / toolchain constraints (JDK/Xcode) / co-existing apps on the same device / business red lines** ← project `CLAUDE.md`
-- **Commit policy (ask up front)** ← **committing is not this skill's job**: whether to commit, and how (commit-as-you-go / one commit at the end / don't commit / other requirements) **is the user's call**. If the project `CLAUDE.md`'s `{{COMMIT_POLICY}}` or this run's instructions already state it, follow that; **if nothing is stated, ask once before starting**, and once clarified follow it for the whole testing process. This skill only makes autonomous testing run smoothly; it doesn't decide committing on the user's behalf.
+- **Commit policy (ask up front)** ← **committing is not this skill's job**: whether to commit, and how (commit-as-you-go / one commit at the end / don't commit / other requirements) **is the user's call**. If the project `CLAUDE.md`'s `{{COMMIT_POLICY}}` or this run's instructions already state it, follow that; **if nothing is stated, ask once before starting**, and once clarified follow it for the whole run. Commit conventions (exact `git add`, message format, whether to push, signature) follow the user's **global / project `CLAUDE.md`** — don't decide them here on the user's behalf.
 
 If you can't read it, first create the project `CLAUDE.md` (fill in `templates/CLAUDE.md`); don't proceed with hardcoded values.
 
 ---
 
-## 0. Environment bootstrap: if a tool/dependency is missing, install it yourself, don't stop for a human
+## 2. Environment bootstrap: if a tool/dependency is missing, install it yourself, don't stop for a human
 
-The **first thing** when entering autonomous mode is to fill in the tools — **whatever you can install/configure yourself, never stop and ask for a human**.
+Once the context is clear, fill in the tools immediately — **anything in the green zone (below), finish it yourself and keep going, never stop and ask for a human**.
 (Lesson: mobile-mcp wasn't registered → fell back to the least efficient blind-tap adb → hit a red line and got blocked → stopped to ask for a human. It should have been installed at the self-check stage.)
 
 One-shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, idempotent and re-entrant: each item is **detect → install if missing → re-verify with an independent command → skip if already installed**). Manual, item by item:
@@ -50,7 +48,9 @@ One-shot: `bash scripts/bootstrap.sh` (cross-platform mac/Linux, Android+iOS, id
 
 `npx mobilewright doctor --json` works as a cross-platform health-check entry point (covers Node/mobilecli/Xcode/Simulators/agent/Java/ADB), then layer on `flutter doctor` + patrol. See `references/android.md`, `references/ios.md` for details.
 
-**Red lines (denied by default — unlocked only by explicit upfront user authorization)**: ① device physically disconnected/unplugged — a physical blocker: self-recover once, still failing → stop and report; ② operations that spend real money or affect real users (payments/charges/transfers/orders; on-chain transactions for blockchain apps); ③ secret/credential operations (production keys/signing certs/user credentials/private keys & mnemonics); ④ irreversible destruction (deleting data/changing production). ②③④ are **never done by default**; the only unlock is **explicit upfront authorization from the user** — in this run's instructions, or in the project `CLAUDE.md`'s `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` stating which class and what scope (e.g. "sandbox payments may place orders", "testnet transactions allowed") — and only within the stated scope. When not authorized: an interactive session may pause and ask once; **unattended, never ask and wait — skip the item, mark "authorization needed: <operation>" in the report, move on**. "The test needs it" is never authorization. Project-specific red lines added via `{{IRREVERSIBLE_REDLINES}}` carry the same force. **Other than these** — installing tools, changing local config, adding dependencies, scaffolding tests are all reversible and low-risk, so **finish them and keep going**; don't treat "the tool isn't installed" as a reason to stop.
+**Red lines (denied by default — unlocked only by explicit upfront user authorization)**: ① device physically disconnected/unplugged — a physical blocker: self-recover once, still failing → stop and report; ② operations that spend real money or affect real users (payments/charges/transfers/orders; on-chain transactions for blockchain apps); ③ secret/credential operations (production keys/signing certs/user credentials/private keys & mnemonics); ④ irreversible destruction (deleting data/changing production). ②③④ are **never done by default**; the only unlock is **explicit upfront authorization from the user** — in this run's instructions, or in the project `CLAUDE.md`'s `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` stating which class and what scope (e.g. "sandbox payments may place orders", "testnet transactions allowed") — and only within the stated scope. When not authorized: an interactive session may pause and ask once; **unattended, never ask and wait — skip the item, mark "authorization needed: <operation>" in the report, move on**. "The test needs it" is never authorization. Project-specific red lines added via `{{IRREVERSIBLE_REDLINES}}` carry the same force.
+
+**Green zone (everything outside the red lines)**: installing tools, changing local config, adding dependencies, scaffolding tests, booting/stopping simulators, installing WDA/agent — reversible, low-risk, **finish them yourself and keep going**; don't treat "the tool isn't installed" as a reason to stop. Every later mention of "green zone" means this.
 
 ---
 
@@ -65,7 +65,7 @@ Only **pure canvas drawing** (inside a chart, elements not wrapped in Semantics)
 
 ---
 
-## Tool decision tree (the base is always mobilecli, don't mindlessly use adb)
+## Tool decision tree (the base is always mobilecli)
 
 | Scenario | What to use | Key |
 |---|---|---|
@@ -149,6 +149,8 @@ read task → self-expand acceptance criteria (3~8 assertable items) → write i
       └─ fail → failure analysis (≤5 rounds) → fix → rerun; still failing after 5 rounds → stop, emit stuck report, continue to next task
 ```
 
+**Completion bar (the report)**: the loop ends in a report that must contain ① `✅/❌ feature name` + **item-by-item acceptance checklist** (including anything stuck at round 5) ② changed-file list ③ key screenshots ④ (if committed per policy) commit hash + message ⑤ outstanding issues. **Missing any one of these means not done** — unattended, you harvest in the morning from this evidence, not from "it said it was done".
+
 **Failure classification**: compile error → read the error from `flutter analyze` and fix; `found 0 widgets` → check Key spelling / whether scroll is needed / conditional rendering; assertion fail → **it's a logic bug, fix the implementation, don't change the test to lower the bar**; crash/timeout → `mobilecli device crashes list|get` read the first line of the stack `package:<your_app>/`; install/connect → `mobilecli devices` + one self-recovery, still failing → stop.
 
 **Patrol commands**: `patrol test -t <file> --device <id> [--timeout 300]` (auto build+install+run); build fails `flutter clean && flutter pub get && patrol test`. Writing template:
@@ -168,7 +170,7 @@ void main() => patrolTest('user can log in with email', ($) async {
 
 ---
 
-## flutter run in background + three-tier hot reload (don't cold-start at the drop of a hat)
+## flutter run in background + three-tier hot reload (change a line, send a signal)
 
 **Precondition**: if the same device is occupied by another `flutter run` (e.g. VS Code debug), release it first — `ps aux | grep "flutter_tools.snapshot run" | grep -v grep`, if found, prompt the user to stop it before continuing, don't force-start.
 
@@ -209,12 +211,6 @@ mobilecli apps terminate --device <id> <packageName>      # 2) actually close th
 
 ---
 
-## Committing: not this skill's job
-
-Whether to commit and how to commit **is decided by the user's commit policy; this skill neither prescribes it nor auto-commits by default** — it is only responsible for making autonomous testing run smoothly. If the user didn't say up front, ask once before starting (commit-as-you-go / one commit at the end / don't commit / other requirements), and once clarified follow it. The concrete commit conventions (exact `git add`, message format, whether to push, signature, etc.) follow the user's **global / project `CLAUDE.md`** — don't decide them here on the user's behalf.
-
----
-
 ## Platform details, advanced topics & portability
 
 - **iOS parity** → `references/ios.md` (`xcrun simctl` simulator first / WebDriverAgent real device / go-ios / device trust·provisioning / teardown terminate)
@@ -223,21 +219,22 @@ Whether to commit and how to commit **is decided by the user's commit policy; th
 - **Tool selection** → `references/tool-decision-tree.md` (when to use mobilecli/mobile-mcp/mobilewright/Patrol)
 - **Scaling / unattended** → `references/scaling.md` (trust ladder, worktree/sub-agent/workflow parallelism, /schedule·/loop)
 - **Project rollout**: `templates/` (CLAUDE.md constitution template + `.claude/settings.json` permission allowlist + format/analyze hook + `.claude/commands/{spec,verify,ship,debug,nightly}.md`). One-shot install: `bash setup-project.sh <project root>` (see README).
-- **Report format**: `✅/❌ feature name` + acceptance-condition checkboxes (with round-5 failure marker) + changed files + key screenshots + (if committed per policy) Commit (hash+message) + outstanding issues.
 
 ---
 
-## Rules — Always / Never (hard principles, don't drop a single one)
+## Rules — hard-principle checklist (don't drop a single one; the mechanics live in their own sections, this is only for checking)
 
 **Always**
-1. On entering autonomous mode, bootstrap the environment first; reversible low-risk things (installing tools/changing local config/adding deps/scaffolding) do yourself and keep going.
-2. Before interacting, `dump ui` to inspect, locate by Key/label, **don't guess element names**; take coordinates from the rect center (physical pixels), element-driven over blind-tap.
-3. Add `Key` (Patrol) + `Semantics` (element-driven) to every interactive/assertable widget; explicitly wrap custom gesture widgets in `Semantics`; if it won't list = go back and fix the code, don't make do with blind-tap.
-4. Logic that can be verified by offline fixture in seconds, verify offline first (`flutter test`); only verify on a real device what only a real device can verify; what can be proven by logs (connection/state machine) use logs, more reliable than screenshots.
-5. Change code via `--pid-file` + `USR1`/`USR2` signal hot reload/restart, don't cold-start at the drop of a hat.
-6. Teardown closes the app in two steps (stop the host + `apps terminate`/force-stop) and **re-check to confirm**; **don't verify, don't report done** — behind every "done/stopped/committed" there must be an independent command checking the real state.
-7. Assertion fail = logic bug, **fix the implementation, don't change the test to lower the bar**; self-fix **≤5 rounds**, on round 3 note tried directions, on round 4 switch approach, on round 5 stop and emit a stuck report, continue to the next task.
-8. **Committing is not this skill's job**: whether to / how to commit follows the user's commit policy (ask up front: incremental commit / final commit / no commit / other); commit conventions follow the user's global / project `CLAUDE.md` — don't decide on the user's behalf, don't auto-commit by default.
+1. Bootstrap the environment first; anything in the **green zone**, finish it yourself and keep going (§2).
+2. Before interacting, `dump ui` to inspect, locate by Key/label, take coordinates from the rect center.
+3. Double-tag interactive/assertable widgets with `Key` + `Semantics`; if `dump ui` won't list it = go back and fix the code.
+4. Prove offline first with `flutter test` whatever can be proven offline; use logs, not screenshots, for whatever logs can prove.
+5. Change code via `--pid-file` + `USR1`/`USR2`, don't cold-start.
+6. Teardown closes the app in two steps and **re-checks to confirm**; **don't verify, don't report done**.
+7. Assertion fail = logic bug, fix the implementation, don't change the test; self-fix **≤5 rounds** (round 3 note tried directions, round 4 switch approach, round 5 stop and emit a stuck report, continue to the next task).
+8. Emit the report with all five **completion bar** items; missing any one means not done.
+9. Commit per the user's commit policy (§1), never auto-commit by default.
 
-**Never (four red lines, denied by default)**: ① device physically disconnected (stop only after one self-recovery attempt) ② real-money operations (payments/transfers/on-chain) ③ secret/credential operations ④ irreversible destruction; plus the project-specific red lines from the project `CLAUDE.md`. ②③④ may be done only with **explicit upfront user authorization** (this run's instructions or the project `CLAUDE.md`, scope stated); when not authorized: interactive may ask once, unattended skips and marks "authorization needed" — never hang waiting. Otherwise do it yourself and keep going.
-**Never anti-patterns**: blind-tap coordinates when Semantics exists / hardcoding historical coordinates (must be fetched live from dump at runtime) / treating `kill flutter run` as closing the app / changing the test to bypass an assertion / treating "I ran the operation" as "I achieved the result".
+**Never — the four red lines** (denied by default; the only unlock is explicit upfront user authorization with the scope stated; see §2): ① device physically disconnected (stop only after one self-recovery attempt) ② real-money operations ③ secret/credential operations ④ irreversible destruction, plus the project-specific red lines from the project `CLAUDE.md`. When not authorized: interactive may ask once, unattended skips and marks "authorization needed" — never hang waiting.
+
+**Never — anti-patterns**: blind-tap when Semantics exists / hardcoding historical coordinates / treating `kill flutter run` as closing the app / changing the test to bypass an assertion / treating "I ran the operation" as "I achieved the result".

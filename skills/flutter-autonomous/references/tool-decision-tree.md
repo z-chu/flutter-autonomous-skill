@@ -36,37 +36,26 @@ mobilecli  ───────┼─ mobilewright   (Playwright 风 TS 框架,
 
 **为什么默认**:已装就是个二进制,**不依赖 MCP 注册、不需要重启会话**,装好立刻能用;坐标级 `dump ui` → `io tap` 闭环最短,适合"自己点、自己看、流畅推进"。
 
-### 命令面速查表
+### 命令面:只记环境查不到的那部分
 
-| 域 | 命令 | 用途 |
-|---|---|---|
-| **devices** | `mobilecli devices` / `--include-offline` | 列在线设备(JSON);加 `--include-offline` 含未启的模拟器/模拟机 |
-| **device** | `device boot` / `device shutdown` | 启动 / 关停模拟器·模拟机 |
-| | `device reboot` | 重启设备 |
-| | `device info` | 设备信息 |
-| | `device orientation` | 读/设朝向 |
-| | `device crashes list` / `crashes get <id>` | 列崩溃报告 / 取某条堆栈(iOS 真机走 crashreport service;模拟器读 DiagnosticReports;Android 解析 `logcat -b crash`) |
-| | `device url <deeplink>` | 打开 deeplink / 自定义 scheme,**深链跳关**省逐级导航 |
-| **apps** | `apps launch <bundleId>` | 拉起 App 到前台 |
-| | `apps terminate <bundleId>` | 真关 App(Android=force-stop / iOS=simctl terminate,已抹平) |
-| | `apps foreground` | **当前前台 App**(防串台校验:`packageName` 是否=目标包) |
-| | `apps list` | 列已装 App |
-| | `apps install <path>` / `apps uninstall <bundleId>` | 装(.apk/.ipa/.zip)/ 卸 |
-| | `apps path <bundleId>` | App 数据容器路径(Android) |
-| **io** | `io tap x,y` | 点坐标(取 `dump ui` rect 中心,不盲猜) |
-| | `io longpress x,y [--duration ms]` | 长按 |
-| | `io swipe x1,y1,x2,y2` | 滑动 / 列表滚动 / 下拉刷新 / 拖滑块 |
-| | `io text '文本'` | 系统输入框输入(Flutter 自绘键盘喂不进,逐键 `io tap`) |
-| | `io keys` | 发按键序列 |
-| | `io button <HOME\|BACK\|POWER\|VOLUME_UP\|...>` | 硬件键(**BACK / DPAD 仅 Android**;iOS 无 BACK 用手势/导航栏 tap) |
-| | `io gesture` | 自定义手势 |
-| **dump ui** | `dump ui` | 列元素:label + **设备像素 rect{x,y,width,height}**;交互前先 dump 检视 |
-| **screenshot** | `screenshot [-o file\|-]` / `--format jpeg --quality N` | 截图 → Read 核验;`-o -` 输出 stdout |
-| **fs** | `fs ls / pull / push / mkdir [-p] / rm [-r]` | 设备/容器文件读写(**Android + iOS 模拟器**;`/data/user/` 需 app 可调试) |
-| **webview** | `webview list / goto / reload / back / forward / url / title / content / query <css> / eval <js> / wait` | 内嵌 webview 检视与操作(**query/eval 仅作用 webview DOM,不作用原生/Flutter 控件**) |
-| **agent** | `agent status / install [--force] [--provisioning-profile]` | 设备端 agent(**iOS 触控/截流/UI 树必需**;Android 仅非 ASCII 输入需要) |
-| **server** | `server start [--listen :12000]` | 起 HTTP `/rpc` + WS `/ws`,缓存保活、加速反复交互 |
-| **remote** | `remote allocate / list-devices / release` | 云端设备(device lab) |
+**完整命令面查 `mobilecli --help` / `mobilecli <域> --help`**,那是唯一不会过期的来源。这里只列**帮助里看不出的坑与用法**:
+
+| 命令 | 帮助里看不出的部分 |
+|---|---|
+| `devices` | 输出是 JSON `{status,data:{devices:[…]}}`,取 `.data.devices[0].id`;`--include-offline` 才含未启的模拟器 |
+| `device crashes list` / `crashes get <id>` | 失败分类的入口:读堆栈第一行 `package:<your_app>/` 定位。三端实现不同(iOS 真机 crashreport service / 模拟器 DiagnosticReports / Android 解析 `logcat -b crash`),命令已抹平 |
+| `device url <deeplink>` | **深链跳关**——直达页面,省掉逐级导航,是最被低估的一条 |
+| `apps terminate` | Android=force-stop / iOS=simctl terminate,已抹平。**`kill flutter run` 不等于它** |
+| `apps foreground` | **防串台校验**:返回的 `packageName` 必须=目标包,截图/点击前先查 |
+| `apps path <bundleId>` | **仅 Android**;iOS 拿容器路径只能靠它,没有 `fs` 任意路径 |
+| `io tap x,y` | 坐标取 `dump ui` 的 rect 中心,**不盲猜、不写死历史坐标** |
+| `io text '文本'` | 只喂系统输入框。**Flutter 自绘键盘/自定义手势控件喂不进** → 逐键 `io tap`;Android 非 ASCII 需先装 on-device agent |
+| `io button <KEY>` | **BACK / DPAD 仅 Android**;iOS 无 BACK,用手势或点导航栏返回控件 |
+| `dump ui` | 返回**设备物理像素** rect,直接用无需换算;iOS 上 stderr 有大量隧道日志——**别写 `2>&1`**,会污染 JSON |
+| `fs ls/pull/push/rm` | **仅 Android + iOS 模拟器**;`/data/user/` 需 app 可调试 |
+| `webview query <css>` / `eval <js>` | **只作用 webview DOM**,不作用原生控件,更不作用 Flutter Semantics 树(最常见的误解,见文末) |
+| `agent install [--provisioning-profile]` | **iOS 触控/截流/UI 树必需**;Android 仅非 ASCII 输入需要。真机 profile 直接用 app 自身的 `embedded.mobileprovision` |
+| `server start [--listen :12000]` | 起 HTTP `/rpc` + WS `/ws`,**缓存 + 保活隧道,显著加快反复交互**——反复点同一台设备时值得起 |
 
 > 几乎所有命令都吃 `--device <id>`;设备 id **运行期从 `mobilecli devices` 现取,绝不写进文件**。
 

@@ -30,7 +30,7 @@ ADB="$(adb_bin)"
 
 - Try both env vars: newer projects mostly use `ANDROID_HOME`, older ones may only have `ANDROID_SDK_ROOT`.
 - Fallback bare `adb`: the user may have installed platform-tools via Homebrew / a package manager, already on PATH.
-- If you truly can't find it, this falls under "provisioning tools" (reversible, low risk) — install platform-tools yourself, then re-verify with `"$ADB" --version`; don't stop and ask for manual help.
+- If you truly can't find it, this is **green zone** (keystone §2) — install platform-tools yourself, then re-verify with `"$ADB" --version`; don't stop and ask for manual help.
 
 ---
 
@@ -168,7 +168,7 @@ The following are the **platform last resort**, used only for pure canvas where 
 JDK / Gradle / Android SDK versions are **project-specific**, varying by machine/project → put them in the project `CLAUDE.md`; this doc doesn't hardcode them.
 
 - Just one troubleshooting anchor: when `flutter run` / a Gradle build reports `compileDebugJavaWithJavac` failure, **the most common cause is a JDK version mismatch with the project's requirement** (Gradle used the system default JDK instead of the version the project requires). Read which JDK to use and how to specify it (`org.gradle.java.home` / `JAVA_HOME`) from the project `CLAUDE.md`.
-- A toolchain error is a build-environment issue; fix it to the version specified in the project `CLAUDE.md` and re-run; this is still reversible low-risk and you handle it yourself.
+- A toolchain error is a build-environment issue; fix it to the version specified in the project `CLAUDE.md` and re-run; this is still **green zone** and you handle it yourself.
 
 ---
 
