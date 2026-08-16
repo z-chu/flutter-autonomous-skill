@@ -140,9 +140,9 @@ mobilecli screenshot --device "$D" -o "$SHOT"           # 截图 → Read 核验
 
 **Flutter 定位优先级(由稳到脆)**:Patrol `Key`(回归最稳) > `Semantics(identifier:)`(不随文案/语言变) > `Semantics` label 精确 > role/`button:true` 标志 > label 子串/正则 > 纯文本 > 盲点坐标(末选)。
 
-要点:坐标取 `dump ui` rect 中心**不盲猜**;Flutter **自绘数字键盘/自定义手势控件不是系统输入框**,`io text` 喂不进 → 逐个 `io tap` 键坐标;某控件列不出 = 没暴露 Semantics → **回代码补**(下)。深链跳关:`mobilecli device url <deeplink>` 直达页面,省逐级导航。
+要点:坐标取 `dump ui` rect 中心**不盲猜**;Flutter **自绘数字键盘/自定义手势控件不是系统输入框**,`io text` 喂不进 → 逐个 `io tap` 键坐标;某控件列不出 = 没暴露 Semantics → **回代码补**(下)。深链跳关:`mobilecli device url <deeplink>` 直达页面,省逐级导航。**同一招也适用于状态深度,不只是导航深度**:被测东西只在很深处才出现时(列表第 40 页、倒计时结束后、某个错误态),用 UI 一步步推过去每趟都是几分钟、而且通常要推好几趟——加一个 debug-only 钩子把 App 一步摆到那个状态,再从那儿开始验。
 
-**「静默失败」清单——发出去 ≠ 生效**。底座只保证「事件发出去了」,不保证「Flutter 收下并识别了」:`io swipe`(Flutter 滚动手势对合成事件的时长/步进敏感,典型表现是屏幕纹丝不动)、合成 `io longpress`(WDA 合成的长按 Flutter 侧可能不认,典型是 AppBar 标题上的 `GestureDetector` 长按)、以及**点在了包住目标的容器空白处**(Semantics 合并后祖先节点的 label 天然含子串,`dump ui` 里它还排在叶子前面——按 rect 面积挑最小的那个)。这类命令**发完就回查**:滑动后重新 `dump ui` 比对锚点元素的 `rect.y` 有没有变(或前后截图对比),点完回查落点、点错了 `io button BACK` 退回;没变就加大位移/放慢时长重试一次,**两次不动就换路径**(deeplink 直达、或 Patrol 的 `scrollTo` 让 Dart 侧自己滚)。长按这类**根本打不进去的手势,正解是回代码**——换成有 `Semantics` 的可点控件,和「列不出=回代码补」同一条原则,顺带人工测试也更好用。「点了没反应」这类判断,真因多半在这一段。
+**「静默失败」清单——发出去 ≠ 生效**。底座只保证「事件发出去了」,不保证「Flutter 收下并识别了」:`io swipe`(Flutter 滚动手势对合成事件的时长/步进敏感,典型表现是屏幕纹丝不动)、合成 `io longpress`(WDA 合成的长按 Flutter 侧可能不认,典型是 AppBar 标题上的 `GestureDetector` 长按)、**点在了包住目标的容器空白处**(Semantics 合并后祖先节点的 label 天然含子串,`dump ui` 里它还排在叶子前面——按 rect 面积挑最小的那个)、以及 **`io text` 打字被吞**(焦点没落在输入框、或输入法面板截胡;Android 上打字前必须禁掉**全部**输入法,只禁默认那个会让语音输入接管,见 `references/android.md` §4.4)。这类命令**发完就回查**:滑动后重新 `dump ui` 比对锚点元素的 `rect.y` 有没有变(或前后截图对比),点完回查落点、点错了 `io button BACK` 退回,**打完字回读同一个元素的 `text` 与期望逐字比对**;没变就加大位移/放慢时长重试一次,**两次不动就换路径**(deeplink 直达、或 Patrol 的 `scrollTo` 让 Dart 侧自己滚)。长按这类**根本打不进去的手势,正解是回代码**——换成有 `Semantics` 的可点控件,和「列不出=回代码补」同一条原则,顺带人工测试也更好用。「点了没反应」这类判断,真因多半在这一段。
 
 ---
 
@@ -200,6 +200,8 @@ Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不�
 
 **层内选择(已经决定要上设备之后)**:「控件找不到 / Key 对不对 / 布局为什么歪」——**别先截图**,用 ④ 看 widget 树和 constraints,一步到源码行,再截图确认观感。
 
+**被测性质跨越不止一屏时**(分页顺序、跨页不重复、「到底了没有」、时间线分组):`dump ui` 永远只返回视口,所以单次 dump 判不了,肉眼再怎么看也判不了。逐屏采集 → 拼成一条序列 → 用代码断言:`references/cross-screen-verification.md`。这类问题住在几百条以下,没人会手动滚到那儿。
+
 ---
 
 ## 自主开发完整循环 + 失败决策树
@@ -207,7 +209,7 @@ Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不�
 ```
 读任务 → 自展开验收标准(3~8 条可断言,逐条标好落哪层)
   → 写实现(关键控件加 Key+Semantics)+ 写配套测试(离线①②③ 能覆盖的先写在离线层)
-  → flutter analyze(零警告)
+  → flutter analyze lib test integration_test(0 error——收窄命令,不是放宽标准;全仓跑会被 build/ 里的第三方代码淹掉)
   → flutter test(离线层 ①②③)   ── 挂?逻辑/行为/视觉契约 bug,不上设备直接修
   → 确认设备在线(mobilecli devices;离线自救一次仍离线才停)
   → patrol test --device <id> -t integration_test/<feature>_test.dart
@@ -238,6 +240,8 @@ Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不�
 - **想跑但跑不了**(Linux 无 iOS 工具链、手上没那台真机):跑得了的跑透,跑不了的标「未验证:<平台>,原因:<无工具链/无设备>」——**不许把单端绿写成双端绿**。
 
 **每条验收条目开跑前,先把 App 复位到已知起点**。上一条留下的页面状态会变成下一条的错误起点——停在某个 bottom sheet 里、还开着筛选面板、卡在半截表单——**越往后越歪,而报告里完全看不出来**(每一步的截图都"有内容",只是验错了页面);无人值守连跑时这种漂移会被逐条放大。复位就三步:`apps terminate` → `apps launch` → `dump ui` 确认落在预期起点,几秒的成本换掉整条验收作废的风险。起点和收尾一样要**回查**:`dump ui` 说落在首页,才算落在首页。
+
+**修完之后,原本通过的项也要重跑,不只是原本失败那项。**改动只要动了**规模、时序、频率**——页大小、超时、轮询间隔、并发数、批量大小——就会把所有原本靠运气赢下来的竞态重新洗牌。把一页从「远端一大批」压到 15 条,就足以让一个既有竞态从「撞不上」变成「每次必现」,而且现场在一条一直是绿的路径上。你盯着的是你修的那项,回归落在你没盯的地方。
 
 **完成门槛(报告)**:闭环的终点是一份报告,必须含 ① `✅/❌ 功能名` + **逐条验收对照**(含第 5 轮卡住项)② 改动文件清单 ③ 关键截图 ④(若按策略提交了)commit hash + message ⑤ 遗留问题。**缺一项不算完成**——无人值守时你早上是靠这份证据收割的,不是靠"它说做完了"。
 
@@ -304,6 +308,8 @@ done
 
 口诀:Dart 方法体→USR1;初始化/注册/main/路由→USR2;**codegen 输入→先生成再 USR2**;动原生/pubspec/插件→冷启动;**拿不准先 USR2**(仍比冷启快)。
 
+> **临时诊断日志给一个独特前缀**(`[分页诊断]`、`[登录诊断]` …)。它是你在满是第三方噪音的 logcat 里 grep 出自己日志的抓手,更是提交前 grep 一遍**证明自己删干净了**的抓手。打**决定性的值**,不要打「到这儿了」:打那个决定走了哪条分支的状态(`isSuccess=false`、游标、列表长度)。一行选得好的日志,通常能直接终结一场本来要靠截图和猜测拖上好几轮热重载的调查。USR1 加进去、读完、删掉再 USR1。
+
 > **要回查重载成败,就换一条带回执的通道**:`kill -USR1` 发出去没有回执,只能回头 grep 输出猜。要确认"这次重载到底成没成"时走 `flutter run --machine` 的 `app.restart`——它**返回 `{"code":0,"message":"Reloaded N libraries"}`**,`code!=0` 直接就是断言。见 `references/vm-service.md` §2.4。日常随手重载仍用 signal 更省事。
 
 ---
@@ -318,7 +324,7 @@ kill "$(cat <PID_FILE>)" 2>/dev/null                      # 1) 停 flutter run �
 mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Android=am force-stop / iOS=simctl terminate,mobilecli 已抹平)
 # 3) 同设备别项目残留 App 也 terminate;回查前台确认不是残留 App
 ```
-**宣布"测完/停好"前先回查真实状态**。测试中改过的**设备系统状态同样要复原 + 回查**——断过网必须验证网络已恢复(`svc wifi enable` 在部分机型会卡死,可靠恢复路径见 `references/android.md` §10)。
+**宣布"测完/停好"前先回查真实状态**。测试中改过的**设备系统状态同样要复原 + 回查**——断过网必须验证网络已恢复(`svc wifi enable` 在部分机型会卡死,可靠恢复路径见 `references/android.md` §10);关过动画、禁过输入法同理,**输入法要还原成原本启用的那份清单和原本的默认输入法**,别拿清单第一行顶包(§4.2 / §4.4)。
 
 ---
 
@@ -326,8 +332,9 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 
 - **VM Service 内省** → `references/vm-service.md`(第三条路:widget 树带源码行号 / render 树真实尺寸 / 结构化错误 / evaluate 读状态 / 运行时切深色模式;HTTP 与 WS 的能力边界)
 - **iOS 对等** → `references/ios.md`(`xcrun simctl` 模拟器优先 / WebDriverAgent 真机 / go-ios / 设备信任·provisioning / 确定性开关 / 收尾 terminate)
-- **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/关动画等确定性开关/性能指标/断网测试与恢复,平台末选)
+- **Android 细节** → `references/android.md`(adb 路径/wm size/dumpsys/logcat/关动画等确定性开关/输入法禁用与还原/性能指标/断网测试与恢复,平台末选)
 - **离线测试层** → `references/offline-test-layer.md`(fixture 四策略 + widget test + golden 矩阵 + a11y guideline)
+- **跨屏验证** → `references/cross-screen-verification.md`(一屏看不出的性质:分页顺序 / 跨页不重复 / 能否到底——逐屏采集、拼接、用代码断言;附三个坑:先校准尺子、「画面不动」有三种意思、原始数据别进上下文)
 - **工具选型** → `references/tool-decision-tree.md`(mobilecli/mobile-mcp/mobilewright/Patrol 何时用)
 - **受限网络/权限** → `references/restricted-network.md`(npm 被企业网关拦时的备用渠道、macOS 执行位与 quarantine、哪些卡点只能人给)
 - **规模化/无人值守** → `references/scaling.md`(信任阶梯、worktree/子代理/workflow 并行、/schedule·/loop)
@@ -345,9 +352,9 @@ mobilecli apps terminate --device <id> <packageName>      # 2) 真关 App(Androi
 5. 纯逻辑 bug 用离线层秒级定位、静态视觉回归交给 golden——**目的是把设备时间留给真正要看 UI 的部分**。
 6. 验收标准先自展开成 3~8 条可断言条目并逐条标层;每条开跑前**复位到已知起点**;跑几端按改动性质定,单端绿如实写成单端绿,模拟器给不了的能力直接上真机(§自主开发完整循环)。
 7. 找不到控件 / 布局歪 / 疑似报错,**先查 VM Service**(widget 树带源码行号、render 树给真实 constraints),别一上来就截图肉眼找。
-8. 改代码走 `--pid-file` + `USR1`/`USR2`;改了 codegen 输入(`.arb`/freezed/drift)**先跑生成器再 USR2**;要**回查**重载成败走 `--machine` 的 `app.restart`。等构建给全「起来了/死了/超时」三个出口(§flutter run 后台化)。
+8. 改代码走 `--pid-file` + `USR1`/`USR2`;改了 codegen 输入(`.arb`/freezed/drift)**先跑生成器再 USR2**;要**回查**重载成败走 `--machine` 的 `app.restart`。等构建给全「起来了/死了/超时」三个出口。临时诊断日志统一带**一个独特前缀**——既是读它时的过滤条件,也是提交前证明「一条不剩全删干净」的依据(§flutter run 后台化)。
 9. 收尾两步关 App 并**回查**前台;**不回查不报完成**。
-10. 断言失败=逻辑 bug,修实现不改测试;自修复 **≤5 轮**(第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告,继续下个任务)。
+10. 断言失败=逻辑 bug,修实现不改测试;自修复 **≤5 轮**(第3轮记已试方向、第4轮换思路、第5轮停下出卡住报告,继续下个任务)。**改完之后要把原本通过的条目也重跑一遍**——动了规模/时序/频率(分页大小、超时、轮询间隔、并发)的改动,会把所有原本靠运气赢的竞态挪一遍。
 11. 报告按**完成门槛**五项出齐,缺一项不算完成。
 12. 提交按用户提交策略执行(§1),不默认自动提交。
 

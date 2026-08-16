@@ -140,9 +140,9 @@ mobilecli screenshot --device "$D" -o "$SHOT"           # screenshot → Read to
 
 **Flutter locator priority (most to least robust)**: Patrol `Key` (most robust for regression) > `Semantics(identifier:)` (immune to copy and locale changes) > exact `Semantics` label > role/`button:true` flag > label substring/regex > plain text > blind coordinates (last resort).
 
-Key points: take coordinates from the `dump ui` rect center, **never guess**; Flutter's **custom-painted numeric keypads and custom gesture widgets are not system text fields** — `io text` won't reach them → tap each key's coordinates with `io tap`; if a widget can't be listed = it doesn't expose Semantics → **go fix the code** (below). Deeplink shortcut: `mobilecli device url <deeplink>` jumps straight to a page, skipping step-by-step navigation.
+Key points: take coordinates from the `dump ui` rect center, **never guess**; Flutter's **custom-painted numeric keypads and custom gesture widgets are not system text fields** — `io text` won't reach them → tap each key's coordinates with `io tap`; if a widget can't be listed = it doesn't expose Semantics → **go fix the code** (below). Deeplink shortcut: `mobilecli device url <deeplink>` jumps straight to a page, skipping step-by-step navigation. **The same shortcut applies to state depth, not just navigation depth**: when the thing under test only shows up deep in (page 40 of a list, after a countdown, in an error state), driving the UI there costs minutes per pass and you usually need several passes — add a debug-only hook that puts the app in that state in one step and verify from there.
 
-**The "silent failure" list — sent ≠ took effect.** The backend only guarantees "the event was dispatched", not "Flutter received and recognized it": `io swipe` (Flutter's scroll gestures are sensitive to a synthesized event's duration/step, and the typical symptom is a screen that doesn't move at all), a synthesized `io longpress` (a WDA-synthesized long-press may not be recognized on the Flutter side — typically a long-press `GestureDetector` on an AppBar title), and **tapping the blank area of a container that wraps your target** (after Semantics merging an ancestor's label naturally contains the substring, and in `dump ui` it comes *before* the leaf — pick the smallest rect by area). **Re-check these the moment you send them**: after a swipe, `dump ui` again and compare an anchor element's `rect.y` (or diff before/after screenshots); after a tap, re-check where it landed and `io button BACK` out if it landed wrong; if nothing moved, retry once with a longer distance / slower duration, and **if it doesn't move twice, change route** (deeplink straight to the page, or let the Dart side scroll itself via Patrol's `scrollTo`). For a gesture that simply **cannot be delivered — a long-press being the usual one — the fix is in the code**: replace it with a tappable widget that has `Semantics`, the same "can't list it = go fix the code" principle (which also makes manual testing better). A "tapped it, nothing happened" conclusion usually traces back to this paragraph.
+**The "silent failure" list — sent ≠ took effect.** The backend only guarantees "the event was dispatched", not "Flutter received and recognized it": `io swipe` (Flutter's scroll gestures are sensitive to a synthesized event's duration/step, and the typical symptom is a screen that doesn't move at all), a synthesized `io longpress` (a WDA-synthesized long-press may not be recognized on the Flutter side — typically a long-press `GestureDetector` on an AppBar title), **tapping the blank area of a container that wraps your target** (after Semantics merging an ancestor's label naturally contains the substring, and in `dump ui` it comes *before* the leaf — pick the smallest rect by area), and **`io text` typing getting swallowed** (focus never landed in the field, or the IME panel intercepted it; on Android you must disable **every** input method before typing — disabling only the default one lets voice input take over, see `references/android.md` §4.4). **Re-check these the moment you send them**: after a swipe, `dump ui` again and compare an anchor element's `rect.y` (or diff before/after screenshots); after a tap, re-check where it landed and `io button BACK` out if it landed wrong; **after typing, read the same element's `text` back and compare it character for character against what you expected**; if nothing moved, retry once with a longer distance / slower duration, and **if it doesn't move twice, change route** (deeplink straight to the page, or let the Dart side scroll itself via Patrol's `scrollTo`). For a gesture that simply **cannot be delivered — a long-press being the usual one — the fix is in the code**: replace it with a tappable widget that has `Semantics`, the same "can't list it = go fix the code" principle (which also makes manual testing better). A "tapped it, nothing happened" conclusion usually traces back to this paragraph.
 
 ---
 
@@ -200,6 +200,8 @@ Scaffold(key: const Key('home_screen'), ...)        // page root: to judge "am I
 
 **Choosing within the device layer (once you've decided to go on-device)**: "can't find the widget / is the Key right / why is the layout skewed" — **don't screenshot first**; use ④ to read the widget tree and constraints, jump straight to the source line, then screenshot to confirm the look.
 
+**When the property spans more than one screenful** (paging order, no duplicates across page boundaries, "does it reach the end", timeline grouping): `dump ui` only ever returns the viewport, so no single dump — and no amount of eyeballing — can decide it. Collect per screen → stitch into one sequence → assert in code: `references/cross-screen-verification.md`. These failures live hundreds of items down, where nobody scrolls by hand.
+
 ---
 
 ## The full autonomous loop + failure decision tree
@@ -207,7 +209,7 @@ Scaffold(key: const Key('home_screen'), ...)        // page root: to judge "am I
 ```
 read the task → self-expand acceptance criteria (3–8 assertable items, each tagged with its layer)
   → write the implementation (Key+Semantics on key widgets) + companion tests (whatever offline ①②③ can cover goes offline first)
-  → flutter analyze (zero warnings)
+  → flutter analyze lib test integration_test (0 errors — scope the command, don't loosen the bar; a whole-repo run is drowned by third-party code under build/)
   → flutter test (offline layers ①②③)   ── failing? logic/behavior/visual-contract bug; fix it without touching a device
   → confirm a device is online (mobilecli devices; one self-recovery attempt, stop only if still offline)
   → patrol test --device <id> -t integration_test/<feature>_test.dart
@@ -238,6 +240,8 @@ Counter-examples: "Remember me works fine", "the experience is smooth" — not d
 - **You want to but can't** (Linux has no iOS toolchain, you don't have that physical device): run what you can thoroughly, and mark what you can't as "not verified: <platform>, reason: <no toolchain / no device>" — **never write single-platform green as both-platform green**.
 
 **Before each acceptance item, reset the app to a known starting point.** Whatever state the previous item left behind becomes the next item's wrong starting point — parked inside a bottom sheet, a filter panel still open, stuck halfway through a form — and **it drifts further with every item while the report shows nothing wrong** (every screenshot "has content"; it's just the wrong page being verified). Running unattended, that drift compounds item by item. The reset is three steps: `apps terminate` → `apps launch` → `dump ui` to confirm you landed on the expected starting point. A few seconds buys off the risk of an entire item being invalid. The starting point gets **re-checked** like teardown does: you're on the home screen when `dump ui` says you are.
+
+**After a fix, re-run the items that were passing, not just the one that was failing.** A fix that changes **scale, timing, or frequency** — page size, timeout, poll interval, concurrency, batch size — moves every race that used to be won by luck. Shrinking a page from "one big remote batch" to 15 items is enough to make a pre-existing race fire on every run, in a path that had been green all along. The item you fixed is the one you're watching; the regression lands somewhere you aren't.
 
 **Completion bar (the report)**: the loop ends in a report that must contain ① `✅/❌ feature name` + a **per-item acceptance table** (including items stuck at round 5) ② the list of changed files ③ key screenshots ④ (if committed per policy) commit hash + message ⑤ open issues. **Missing any one of these means it isn't done** — when running unattended, this evidence is what you harvest in the morning, not "it said it finished".
 
@@ -304,6 +308,8 @@ The URI you get is also the entry point for §Verification layering ④ (convert
 
 Mnemonic: Dart method body → USR1; initialization/registration/main/routes → USR2; **codegen inputs → generate first, then USR2**; native/pubspec/plugins → cold start; **when unsure, USR2 first** (still faster than a cold start).
 
+> **Temporary diagnostic logs: give them one distinctive prefix** (`[paging-probe]`, `[auth-probe]` …). It's what you grep to find them in a logcat full of third-party noise, and — more importantly — what you grep to **prove you removed every one of them** before committing. Print the deciding values, not "got here": the state that decides which branch ran (`isSuccess=false`, cursor, list length). One well-chosen log line usually ends an investigation that screenshots and guessing were going to drag through several hot-reload rounds. Add via USR1, read, then delete and USR1 again.
+
 > **To re-check whether a reload succeeded, switch to a channel that answers back**: `kill -USR1` is fire-and-forget — it leaves you grepping output and guessing. When you must confirm "did this reload actually take", use `app.restart` over `flutter run --machine` — it **returns `{"code":0,"message":"Reloaded N libraries"}`**, and `code!=0` is the assertion itself. See `references/vm-service.md` §2.4. For casual day-to-day reloads, the signal is still less hassle.
 
 ---
@@ -318,7 +324,7 @@ kill "$(cat <PID_FILE>)" 2>/dev/null                      # 1) stop the flutter 
 mobilecli apps terminate --device <id> <appId>            # 2) actually close the app (Android=am force-stop / iOS=simctl terminate; mobilecli abstracts it)
 # 3) terminate leftover apps from other projects on the same device too; re-check the foreground isn't a leftover app
 ```
-**Before announcing "tested/stopped", re-check the real state.** **Device system state you changed during testing must be restored and re-checked too** — if you cut the network, you must verify it's back (`svc wifi enable` hangs on some models; the reliable recovery path is in `references/android.md` §10).
+**Before announcing "tested/stopped", re-check the real state.** **Device system state you changed during testing must be restored and re-checked too** — if you cut the network, you must verify it's back (`svc wifi enable` hangs on some models; the reliable recovery path is in `references/android.md` §10); the same goes for animations you turned off and input methods you disabled — **restore the IMEs to the set that was originally enabled and the default that was originally set**, not whatever tops the list (§4.2 / §4.4).
 
 ---
 
@@ -326,8 +332,9 @@ mobilecli apps terminate --device <id> <appId>            # 2) actually close th
 
 - **VM Service introspection** → `references/vm-service.md` (the third path: widget tree with source line numbers / render tree with real sizes / structured errors / evaluate for runtime state / toggling dark mode at runtime; the HTTP vs WS capability boundary)
 - **iOS parity** → `references/ios.md` (`xcrun simctl` simulators first / WebDriverAgent for physical devices / go-ios / device trust & provisioning / determinism switches / terminate on teardown)
-- **Android details** → `references/android.md` (adb paths/wm size/dumpsys/logcat/determinism switches like disabling animations/performance metrics/offline testing and recovery; the platform last resort)
+- **Android details** → `references/android.md` (adb paths/wm size/dumpsys/logcat/determinism switches like disabling animations/disabling and restoring input methods/performance metrics/offline testing and recovery; the platform last resort)
 - **Offline test layer** → `references/offline-test-layer.md` (four fixture strategies + widget tests + golden matrix + a11y guidelines)
+- **Cross-screen verification** → `references/cross-screen-verification.md` (properties one screenful can't show: paging order / no duplicates / reaching the end — collect per screen, stitch, assert in code; plus the three traps: calibrate your ruler first, "the screen didn't move" means three different things, keep raw data out of context)
 - **Tool selection** → `references/tool-decision-tree.md` (when to use mobilecli/mobile-mcp/mobilewright/Patrol)
 - **Restricted network/permissions** → `references/restricted-network.md` (fallback channels when a corporate gateway blocks npm, macOS exec bit & quarantine, which blockers only a human can clear)
 - **Scaling/unattended** → `references/scaling.md` (the trust ladder, worktree/subagent/workflow parallelism, /schedule·/loop)
@@ -345,9 +352,9 @@ mobilecli apps terminate --device <id> <appId>            # 2) actually close th
 5. Locate pure-logic bugs in the offline layer in seconds and leave static visual regression to goldens — **the point is to reserve device time for what genuinely needs looking at**.
 6. Self-expand the acceptance criteria into 3–8 assertable items and tag each with its layer; **reset to a known starting point** before each item; decide how many platforms by the nature of the change, write single-platform green up as single-platform green, and go straight to a real device for what a simulator can't give you (§The full autonomous loop).
 7. Can't find a widget / layout is skewed / suspect an error → **check the VM Service first** (widget tree with source line numbers, render tree with real constraints); don't start by eyeballing screenshots.
-8. Change code via `--pid-file` + `USR1`/`USR2`; if you changed a codegen input (`.arb`/freezed/drift), **run the generator before USR2**; to **re-check** a reload, use `app.restart` over `--machine`. Give a build wait all three exits — "it's up / it died / it's stuck" (§Backgrounding flutter run).
+8. Change code via `--pid-file` + `USR1`/`USR2`; if you changed a codegen input (`.arb`/freezed/drift), **run the generator before USR2**; to **re-check** a reload, use `app.restart` over `--machine`. Give a build wait all three exits — "it's up / it died / it's stuck". Temporary diagnostic logs get **one distinctive prefix** — it's what you grep to read them, and what you grep to prove you removed every one before committing (§Backgrounding flutter run).
 9. Two teardown steps to close the app, then **re-check** the foreground; **no re-check, no completion claim**.
-10. An assertion failure is a logic bug: fix the implementation, don't change the test; self-repair **≤5 rounds** (round 3: record what you've tried; round 4: change approach; round 5: stop, emit a stuck report, move on).
+10. An assertion failure is a logic bug: fix the implementation, don't change the test; self-repair **≤5 rounds** (round 3: record what you've tried; round 4: change approach; round 5: stop, emit a stuck report, move on). **After a fix, re-run the items that were already passing** — a change to scale/timing/frequency (page size, timeout, poll interval, concurrency) moves every race that used to be won by luck.
 11. Emit all five items of the **completion bar**; missing one means not done.
 12. Commit per the user's commit policy (§1); never auto-commit by default.
 

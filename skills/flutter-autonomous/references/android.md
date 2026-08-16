@@ -181,6 +181,47 @@ Beyond visuals and interaction there's one more dimension: **performance can be 
 
 ---
 
+## 4.4 Input methods: disable every IME before typing, read the text back afterwards
+
+While you type, the on-screen IME panel does two bad things at once: it **covers the element under test**, and it **puts its own candidates/keys into `dump ui`**, so "find the element by label" picks the keyboard instead of your app's widget. So disable the input methods before typing (reversible, green zone).
+
+**Disabling only the default one (Gboard, say) is not enough** — once it's off, the system lets **voice input** take over, and you get a panel anyway. Take the disable list from `ime list -a -s` (`-a` = all, including already-disabled ones) so nothing slips through:
+
+```bash
+# Record the original values first: "which ones were enabled" and "which was the default" are two independent facts
+"$ADB" -s <id> shell ime list -s | tr -d '\r' | sed '/^$/d' > /tmp/imes_enabled.txt
+"$ADB" -s <id> shell settings get secure default_input_method | tr -d '\r' > /tmp/ime_default.txt
+# Disable them all: the list comes from -a (includes already-disabled), so the voice input that would take over is covered
+"$ADB" -s <id> shell ime list -a -s | tr -d '\r' | sed '/^$/d' | while IFS= read -r i; do
+  "$ADB" -s <id> shell ime disable "$i" >/dev/null 2>&1
+done
+"$ADB" -s <id> shell ime list -s        # re-check: empty output = really all disabled
+```
+
+**Restore + re-check at teardown** (same severity as §4.2's animations and §10's network cut — leaving the user's device with no input method is a teardown incident): `enable` only **the ones that were originally enabled**, and write the default back to **the one it originally was**, not the first line of the list. This is the second instance of §4.2's "read the original value before changing a setting": mix the two records up and the user later finds their default keyboard inexplicably swapped.
+
+```bash
+while IFS= read -r i; do "$ADB" -s <id> shell ime enable "$i" >/dev/null 2>&1; done < /tmp/imes_enabled.txt
+"$ADB" -s <id> shell settings put secure default_input_method "$(cat /tmp/ime_default.txt)"
+"$ADB" -s <id> shell settings get secure default_input_method   # re-check: matches /tmp/ime_default.txt
+```
+
+**After typing you must read the text back** — typing belongs to the keystone's "silent failure" list just as `io swipe` does: exit code 0 from `input text` only says the event was dispatched, not that the characters landed in the target field. Read the same element's `text` back and compare it **character for character** against what you expected; a mismatch means it was swallowed:
+
+```bash
+# Tap into the field → type → read the same element back immediately
+mobilecli io tap  --device <id> <center of the field's rect>
+mobilecli io text --device <id> "<expected text>"
+mobilecli dump ui --device <id> > /tmp/ui.json          # read back: fetch that field's text by identifier/label
+# Compare character for character with the expected text; a mismatch = swallowed (don't take exit code 0 for success)
+```
+
+The real cause is one of three: **focus never landed in the field** (you tapped the container wrapping it — keystone's smallest-rect rule), **the IME panel intercepted it** (this section; disabling fixes it), or **it isn't a system text field at all** (a Flutter-painted keypad / custom gesture widget, see §8 — disabling IMEs won't help there, you tap key by key).
+
+> **The boundary with §8**: "disable them all" applies to the adb `input text` path that ASCII typing uses. To enter **Chinese/emoji** you need the on-device agent IME that mobilecli installs (§8) — that one must stay enabled and set as the default, with everything else still disabled; it's built for automation and shows no visible panel. The original values to restore are still the two records this section takes.
+
+---
+
 ## 5. Teardown: force-stop ≠ kill flutter run (must re-check)
 
 `kill flutter run` only severs the host process; the App on the device keeps running (keystone hard principle). To really close the App:
@@ -240,7 +281,7 @@ The following are the **platform last resort**, used only for pure canvas where 
 
 - mobilecli's `io tap` / `io swipe` / `dump ui` / `screenshot` all go through the adb path on Android, **zero extra install**.
 - When `io text` inputs **non-ASCII (Chinese/emoji)**, adb `input text` can't feed it → mobilecli needs an on-device input agent (IME) installed on the device to type it. This is a reversible "provisioning tools" operation: install the agent per the mobilecli docs and continue, don't stop and ask for manual help.
-- Pure English/numeric input is handled by bare adb `input text`, no agent needed.
+- Pure English/numeric input is handled by bare adb `input text`, no agent needed. But **disable the device's input methods per §4.4 before typing** (the panel covers elements and pollutes `dump ui`), and **read the text back afterwards** (exit code 0 ≠ the characters landed).
 - Note the distinction: a Flutter **self-drawn numeric keypad / custom gesture control** isn't a system input field at all — neither `io text` nor adb `input text` can feed it → you can only `io tap` each key's rect center one by one (already stated in the keystone).
 
 ---

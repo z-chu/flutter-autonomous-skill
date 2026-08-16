@@ -119,7 +119,11 @@ skills/flutter-autonomous/
 │   ├── ios.md               # simulator-first iOS: simctl / WDA / provisioning / determinism / teardown
 │   ├── android.md           # adb specifics, log-window assertions, determinism switches, perf, offline tests
 │   ├── offline-test-layer.md# three device-free layers: four fixture strategies + widget test + golden/a11y
+│   ├── cross-screen-verification.md
+│   │                        # properties one screenful can't show: paging order, no duplicates,
+│   │                        # reaching the end — collect per screen, stitch, assert in code
 │   ├── tool-decision-tree.md# when to use mobilecli / VM Service / mobile-mcp / mobilewright / Patrol
+│   ├── restricted-network.md# fallback channels when a gateway blocks npm; blockers only a human can clear
 │   └── scaling.md           # trust ladder, parallel worktrees, overnight unattended runs
 ├── templates/               # installed into YOUR project by setup-project.sh
 │   └── .claude/             # permission allowlist, format/analyze hooks,

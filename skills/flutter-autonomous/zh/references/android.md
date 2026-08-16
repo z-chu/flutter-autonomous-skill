@@ -181,6 +181,47 @@ done
 
 ---
 
+## 4.4 输入法：打字前禁掉全部 IME，打完回读校验
+
+打字时屏幕上的输入法面板同时干两件坏事：**遮住待测元素**，以及**把自己的候选词/按键塞进 `dump ui`**，让「按 label 找元素」挑中输入法而不是 App 的控件。所以打字前把输入法全禁掉（可逆，属绿区）。
+
+**只禁默认那个（比如 Gboard）是不够的**——把它禁掉之后系统会让**语音输入**接管，照样弹面板。禁用清单必须用 `ime list -a -s` 取（`-a` = 全部，含已禁用的），一个不漏：
+
+```bash
+# 先记下原值：「原本启用了哪些」与「原本的默认输入法」是两份独立的原值
+"$ADB" -s <id> shell ime list -s | tr -d '\r' | sed '/^$/d' > /tmp/imes_enabled.txt
+"$ADB" -s <id> shell settings get secure default_input_method | tr -d '\r' > /tmp/ime_default.txt
+# 全禁：清单取 -a（含已禁用的），避免漏掉会接管的语音输入
+"$ADB" -s <id> shell ime list -a -s | tr -d '\r' | sed '/^$/d' | while IFS= read -r i; do
+  "$ADB" -s <id> shell ime disable "$i" >/dev/null 2>&1
+done
+"$ADB" -s <id> shell ime list -s        # 回查：输出为空 = 真的全禁了
+```
+
+**收尾还原 + 回查**（与 §4.2 关动画、§10 断网同级——把用户设备留在「没有输入法」的状态是收尾事故）：只 `enable` **原本就启用的那些**，默认输入法写回**原来那个**，而不是清单第一行。这是 §4.2「改设置前先读原值」的第二个实例：两份原值混用，用户回头会发现默认输入法莫名其妙换了一个。
+
+```bash
+while IFS= read -r i; do "$ADB" -s <id> shell ime enable "$i" >/dev/null 2>&1; done < /tmp/imes_enabled.txt
+"$ADB" -s <id> shell settings put secure default_input_method "$(cat /tmp/ime_default.txt)"
+"$ADB" -s <id> shell settings get secure default_input_method   # 回查：与 /tmp/ime_default.txt 一致
+```
+
+**打完必须回读校验**——打字和 `io swipe` 同属 keystone 的「静默失败」清单：`input text` 退出码 0 只说明事件发出去了，不说明字进了目标输入框。回读同一个元素的 `text` 与期望**逐字**比对，不一致就是被吞了：
+
+```bash
+# 点进输入框 → 打字 → 立刻回读同一个元素校验
+mobilecli io tap  --device <id> <输入框 rect 中心>
+mobilecli io text --device <id> "<期望文本>"
+mobilecli dump ui --device <id> > /tmp/ui.json          # 回读：按 identifier/label 取回该输入框的 text
+# 与「期望文本」逐字比对，不一致 = 被吞（别拿退出码 0 当成功）
+```
+
+常见真因三选一：**焦点没落在输入框**（点的是包住它的容器，见 keystone 面积最小原则）、**输入法面板截胡**（本节，禁掉即可）、**它根本不是系统输入框**（Flutter 自绘键盘 / 自定义手势控件，见 §8——这种禁输入法也没用，只能逐键 `io tap`）。
+
+> **和 §8 的边界**：「全禁」针对的是 ASCII 打字走的 adb `input text` 路径。要输**中文/emoji** 时得靠 mobilecli 装的 on-device agent IME（§8），那一个必须留着启用并设为默认，其余照禁——它是为自动化设计的，不弹可见面板。收尾还原的原值仍以本节记录的那两份为准。
+
+---
+
 ## 5. 收尾：force-stop ≠ kill flutter run（必须回查）
 
 `kill flutter run` 只断了宿主进程，设备上的 App 照常在跑（keystone 硬原则）。真关 App：
@@ -240,7 +281,7 @@ done
 
 - mobilecli 的 `io tap` / `io swipe` / `dump ui` / `screenshot` 在 Android 上都走 adb 路径，**零额外安装**。
 - `io text` 输入**非 ASCII（中文/emoji）**时，adb `input text` 喂不进 → mobilecli 需要在设备上装一个 on-device input agent（IME）才能输。属「补工具」可逆操作：按 mobilecli 文档装好 agent 再继续，别停下要人工。
-- 纯英文/数字输入裸 adb `input text` 就够，无需 agent。
+- 纯英文/数字输入裸 adb `input text` 就够，无需 agent。但**打字前要先按 §4.4 禁掉设备上的输入法**（面板会遮元素、污染 `dump ui`），**打完要回读校验**（退出码 0 ≠ 字进去了）。
 - 注意区分：Flutter **自绘数字键盘 / 自定义手势控件**根本不是系统输入框，`io text` 和 adb `input text` 都喂不进 → 只能逐个 `io tap` 键的 rect 中心（keystone 已述）。
 
 ---

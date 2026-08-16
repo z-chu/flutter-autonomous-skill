@@ -10,7 +10,7 @@
 # This script turns that incident into a check a machine can run.
 #
 # Usage:
-#   bash tools/check-mirror.sh              # structure check: are the files paired, do heading/code-fence counts line up
+#   bash tools/check-mirror.sh              # structure check: files paired, heading/code-fence/line counts in step, references/*.md pointers resolve
 #   bash tools/check-mirror.sh --diff main  # change check: this branch touched zh/ but not the English counterpart → error
 #
 # Exit codes: 0 = pass; 1 = problems found (usable directly in CI / a pre-push hook)
@@ -46,6 +46,30 @@ count_headings() {
   awk '/^```/ { inb = !inb; next } !inb && /^#{1,6} / { n++ } END { print n+0 }' "$1"
 }
 count_fences() { grep -c '^```' "$1" 2>/dev/null; true; }
+count_lines()  { grep -c '' "$1" 2>/dev/null; true; }
+
+# Heading and code-fence counts only see structure, so a whole paragraph can go missing
+# inside a section that still has all its headings. The two sides are translated line for
+# line, so their line counts track each other closely — a gap past the tolerance means a
+# block of prose landed on only one side. Tolerance is generous on purpose: this fires on
+# missing paragraphs, not on a sentence that reads shorter in one language.
+LINE_TOLERANCE_PCT="${LINE_TOLERANCE_PCT:-15}"
+
+# Reference integrity: a `references/foo.md` written in SKILL.md must actually exist on
+# that same side. A pointer to a file that isn't there is a dead end the agent reaches
+# mid-run, and it goes unnoticed because the other side's file does exist.
+refs_check() {
+  local side name skill tag
+  for side in "$SKILL" "$ZH"; do
+    skill="$side/SKILL.md"; tag="SKILL.md"
+    [ "$side" = "$ZH" ] && tag="zh/SKILL.md"
+    [ -f "$skill" ] || continue
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      [ -f "$side/references/$name" ] || err "${tag}: points at references/${name}, which does not exist"
+    done < <(grep -o '`references/[A-Za-z0-9._-]*\.md`' "$skill" | tr -d '`' | sed 's|^references/||' | sort -u)
+  done
+}
 
 structure_check() {
   echo "Structure check: $ZH → English (skills/flutter-autonomous)"
@@ -59,14 +83,20 @@ structure_check() {
     fi
     zh_h=$(count_headings "$zh"); en_h=$(count_headings "$en")
     zh_f=$(count_fences   "$zh"); en_f=$(count_fences   "$en")
+    zh_l=$(count_lines    "$zh"); en_l=$(count_lines    "$en")
+    gap=$(( zh_l > en_l ? zh_l - en_l : en_l - zh_l ))
     if [ "$zh_h" -ne "$en_h" ]; then
       err "${rel}: heading count zh=$zh_h en=$en_h ${c_dim}(usually a section that was never synced across)${c_0}"
     elif [ "$zh_f" -ne "$en_f" ]; then
       err "${rel}: code-block count zh=$zh_f en=$en_f ${c_dim}(a command example landed on only one side)${c_0}"
+    elif [ "$zh_l" -gt 0 ] && [ $(( gap * 100 / zh_l )) -gt "$LINE_TOLERANCE_PCT" ]; then
+      err "${rel}: line count zh=$zh_l en=$en_l, off by $(( gap * 100 / zh_l ))% ${c_dim}(a paragraph inside a section that kept all its headings)${c_0}"
     else
       ok  "${rel} ${c_dim}(headings $zh_h / code blocks $((zh_f/2)))${c_0}"
     fi
   done < <(mirrored_files)
+
+  refs_check
 
   # Reverse: English files with no counterpart on the Chinese side
   while IFS= read -r rel; do

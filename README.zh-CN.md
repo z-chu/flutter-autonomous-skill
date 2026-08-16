@@ -182,7 +182,11 @@ skills/flutter-autonomous/
 │   ├── ios.md               # iOS 模拟器优先：simctl / WDA / provisioning / 确定性开关 / 收尾
 │   ├── android.md           # adb 细节、日志窗口断言、关动画等确定性开关、性能指标、断网测试
 │   ├── offline-test-layer.md# 无设备的三层：fixture 四策略 + widget test + golden/a11y
+│   ├── cross-screen-verification.md
+│   │                        # 一屏看不出来的性质：分页顺序、跨页不重复、有没有真的到底
+│   │                        # —— 逐屏采集、拼接、用代码断言
 │   ├── tool-decision-tree.md# mobilecli / VM Service / mobile-mcp / mobilewright / Patrol 何时用哪个
+│   ├── restricted-network.md# 公司网关挡 npm 时的备用渠道；哪些卡点只有人能解
 │   └── scaling.md           # 信任阶梯、worktree 并行、整晚无人值守
 ├── templates/               # setup-project.sh 装进你项目的模板
 │   └── .claude/             # 权限白名单、format/analyze hook、

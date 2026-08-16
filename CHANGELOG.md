@@ -51,11 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one. It is a runtime blocker, not project configuration — the skill asks the
   person in front of it rather than requiring anything to be set up in advance.
 
-- **`tools/check-mirror.sh`**, a maintainer check that the `en/` mirror hasn't
-  quietly fallen behind. "Sync it afterwards" was an honor-system rule, and it
-  had already failed for two releases without anything in the repo looking wrong.
-  The structural mode pairs every file and compares heading/code-block counts;
-  `--diff <ref>` fails when a branch touches one side alone. It lives outside
+- **`tools/check-mirror.sh`**, a maintainer check that the English files haven't
+  quietly fallen behind `zh/`. "Sync it afterwards" was an honor-system rule, and
+  it had already failed for two releases without anything in the repo looking
+  wrong. The structural mode pairs every file and compares four things —
+  heading counts, code-block counts, line counts (15% tolerance, so a paragraph
+  dropped inside a section that kept all its headings still trips it), and
+  reference integrity: a `references/foo.md` written in `SKILL.md` must exist on
+  that same side, because a pointer into nothing is a dead end the run only
+  discovers mid-task, and the other side's file existing is exactly what hides
+  it. `--diff <ref>` fails when a branch touches one side alone. It lives outside
   `skills/` on purpose — everything under there ships to every user, and a
   maintainer tool is dead weight in every install.
 
@@ -101,6 +106,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the VM Service); `adb shell` is for the physical link only. Getting it backwards
   costs a round spent fixing a network bug that doesn't exist.
 
+- **`references/cross-screen-verification.md`**, for the properties one screenful
+  cannot show. `dump ui` returns the viewport, not the list — so pagination order,
+  no-duplicates across page boundaries, "does it actually reach the end" and
+  timeline grouping are undecidable from any single dump, and undecidable by eye
+  at all, because the failure sits hundreds of items down where nobody scrolls by
+  hand. The method is always the same shape: collect one dump per scroll step to
+  disk, stitch the rounds into one global sequence, assert on that sequence in
+  code. Three traps come with it, each worth a wasted round: **calibrate the ruler
+  before trusting the verdict** — a label filter that misses one row variant drops
+  that variant's group header too and manufactures impossible-looking ordering
+  violations, so when the verdict says "anomaly", verify the judging method before
+  investigating the subject; **"the screen didn't move" means three different
+  things** — the gesture was swallowed, the list is genuinely at the end (Android's
+  default ClampingScrollPhysics gives zero displacement there, by design), or a
+  load is hung — and all three are byte-identical in `dump ui`, which makes the
+  paging footer's states a code defect when they aren't distinguishable
+  (a bare spinner and `SizedBox.shrink()` are the same nothing in the semantics
+  tree; give each state a stable `identifier`); and **keep the raw data out of
+  context** — forty dumps are judged in the shell, and only the verdict is read
+  back.
+
+- **Disable every input method before typing, and read the text back after**
+  (`references/android.md` §4.4). The IME panel covers the element under test
+  *and* puts its own keys into `dump ui`, so locating by label picks the keyboard
+  instead of the app's widget. Disabling the default one is not enough: the system
+  hands over to voice input and you get a panel anyway, so the disable list comes
+  from `ime list -a -s`. Typing then joins the "silent failure" list next to
+  `io swipe` — exit code 0 from `input text` says the event was dispatched, not
+  that the characters landed — so the field's `text` is read back and compared
+  character for character, and a mismatch resolves to one of three causes (focus
+  never landed, the panel intercepted it, or it isn't a system text field at all).
+  Restoring at teardown records two independent facts, which were enabled and
+  which was the default, because mixing them up leaves the user's phone with a
+  silently swapped keyboard.
+
+- **The deeplink shortcut, applied to state depth rather than navigation depth.**
+  When the thing under test only appears deep in — page 40 of a list, after a
+  countdown, in an error state — driving the UI there costs minutes per pass and
+  you rarely need only one pass. A debug-only hook that puts the app in that state
+  in one step is the same move as jumping straight to a page with a deeplink, and
+  on a long list it is the single biggest win available.
+
+- **After a fix, re-run the items that were already passing.** A change to scale,
+  timing or frequency — page size, timeout, poll interval, concurrency, batch size
+  — moves every race that used to be won by luck: shrinking a page from one large
+  remote batch to fifteen items is enough to make a pre-existing race fire on
+  every run, in a path that had been green all along. The item you fixed is the
+  one you're watching; the regression lands somewhere you aren't.
+
+- **One distinctive prefix on temporary diagnostic logs** (`[paging-probe]`).
+  It is what you grep to read them out of a logcat full of third-party noise, and
+  — the part that matters — what you grep to prove every one of them is gone
+  before committing. Print the values that decide which branch ran, not "got
+  here": one well-chosen line usually ends an investigation that screenshots and
+  guessing were going to drag through several hot-reload rounds.
+
 ### Fixed
 
 - **`npx skills add` found no skill at all.** The frontmatter `description:` was
@@ -143,6 +204,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The loop's analyze gate scopes the command instead of loosening the bar.**
+  `flutter analyze (zero warnings)` was a clean pass/fail that nobody could meet
+  in practice: run over the whole repo it drowns in third-party code under
+  `build/`. Narrowing the *verdict* to "count the errors in the dirs you touched"
+  would have fixed the noise by trading away the one thing that made the step
+  decidable — whether it is done. The gate is now `flutter analyze lib test
+  integration_test` at zero errors: same silence about third-party code, and the
+  bound stays binary.
 - **English is now what ships; Chinese moved to `zh/`.** The layout had it
   backwards for an open-source project: `skills/flutter-autonomous/SKILL.md` was
   Chinese and the English mirror sat one directory down in `en/`, so the file
