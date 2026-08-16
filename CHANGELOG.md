@@ -7,16 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- **The report must now say where the run artifacts were written.** A user who is never
-  told the path assumes nothing was produced, cannot reopen a screenshot later, and never
-  discovers they could have had them kept — so the completion bar's "key screenshots" item
-  now requires their location alongside them. `/tmp` stays the default (cleared on reboot,
-  never committed by accident), now as a per-run subdirectory so files don't collide across
-  runs, and §1 lists it as a detected fact like every other: name a directory in
-  `CLAUDE.md` to keep them, and flag it when screenshots hold personal data, since `/tmp`
-  is world-readable. No new configuration and no new script flags.
+## [1.1.0] - 2026-08-16
 
 ### Added
 
@@ -173,47 +164,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   here": one well-chosen line usually ends an investigation that screenshots and
   guessing were going to drag through several hot-reload rounds.
 
-### Fixed
-
-- **`npx skills add` found no skill at all.** The frontmatter `description:` was
-  an unquoted YAML scalar containing `": "` (in `Use for: running the app…`),
-  which YAML reads as a nested mapping — so the skills CLI skipped both
-  `SKILL.md` files with a parse error and reported "No valid skills found". That
-  is install channel A, the one the README lists first. Both descriptions are now
-  single-quoted. Claude Code's own loader was more forgiving and had always read
-  the file, which is why this went unnoticed: the channel that broke was the one
-  the maintainer never used.
-
-- **The build-wait loop could spin forever.** It waited on the vmservice file or
-  a short list of grep patterns, so any failure outside that list (CocoaPods,
-  signing, `No supported devices`) left it polling until the harness killed it —
-  and the `<output>` it grepped never existed, since backgrounding the run left
-  no log file to read. The loop now has all three exits, and the launch keeps
-  output you can `tail`.
-  - Only "the process exited" counts as failure. The deadline is an alarm clock,
-    not a verdict: a cold checkout, a large project, a slow network or a CI
-    container can all legitimately build for half an hour, and a run that reads
-    its own alarm as a failed build and starts over with `flutter clean` turns
-    one slow build into two. Still alive with a growing log means keep waiting.
-
-- **`tap-by-label.sh` could tap nothing at all, and report success.** Two bugs,
-  both of which surface on ordinary Flutter screens:
-  - The TSV put the label first, unescaped. Semantics merging routinely produces
-    multi-line labels (a wallet row is `"Wallet 2\naddress\n$0"`), so one match
-    became several lines: the count inflated, `sed -n Np` picked a fragment with
-    no tabs, the coordinates read back empty, and `io tap ","` went out — while
-    the script printed "tapped" and exited 0. Coordinates now come first, the
-    label is whitespace-folded and emitted last through `@tsv`, and a coordinate
-    check refuses to tap on anything malformed instead of failing silently.
-  - Matches came back in document order, and jq's `..` is pre-order, so an
-    ancestor — whose merged label naturally contains the substring — always
-    ranked above the leaf. `--index 0` therefore tended to tap the row or card
-    wrapping the target, landing in its blank area: the exact "tapped it,
-    nothing happened" symptom. Matches are now sorted by rect area ascending,
-    so the default is the smallest — the leaf you meant — and `--dump-only`
-    prints the areas so a wrong pick is visible before you tap.
+- **A GitHub Releases fallback when npm is blocked.** Reported from the field: a
+  corporate gateway intercepted the npm registry while GitHub stayed open, and
+  the skill's only documented fallbacks (`npx`, which hits the same registry,
+  and building from source, which needs a Go toolchain) were both dead ends — so
+  the run stopped for a human when it did not have to.
+  - `scripts/bootstrap.sh` now falls back to GitHub Releases for mobilecli and
+    jq, handling both macOS traps (missing exec bit, Gatekeeper quarantine).
+    It costs an unaffected machine nothing — the fallback only runs once the
+    normal channel has failed.
+  - A two-line rule in §2: classify a blocker as a **channel** problem (still
+    green zone — switch routes and continue) or a **permission** problem (a
+    genuine stop, since only a human can grant it in a GUI). Getting it
+    backwards costs either a needless stop or a burnt round of self-repair.
+  - `references/restricted-network.md` holds the rest behind a pointer, kept to
+    the handful of things an agent can't guess (npx shares the registry;
+    Gatekeeper quarantine; PATH not persisting across Bash calls; which tools
+    GitHub can't rescue). Scope is a blocked package source only — Xcode, the
+    Android SDK and vendor distribution domains are deliberately out of scope.
+- **`scripts/bootstrap.sh` now checks jq**, a hard dependency of
+  `scripts/tap-by-label.sh` that was previously never verified.
+- Two iOS gotchas: `agent install` backgrounds the app under test (relaunch
+  before dumping), and `xcrun simctl privacy grant/revoke` commonly fails with
+  `Operation not permitted` (reinstall the app or toggle the switch in Settings).
+- A Flutter interaction limit: a WDA-synthesised `io longpress` may not register
+  on the Flutter side; prefer making the gesture a tappable control with
+  `Semantics` instead of fighting it.
 
 ### Changed
+
+- **The report must now say where the run artifacts were written.** A user who is never
+  told the path assumes nothing was produced, cannot reopen a screenshot later, and never
+  discovers they could have had them kept — so the completion bar's "key screenshots" item
+  now requires their location alongside them. `/tmp` stays the default (cleared on reboot,
+  never committed by accident), now as a per-run subdirectory so files don't collide across
+  runs, and §1 lists it as a detected fact like every other: name a directory in
+  `CLAUDE.md` to keep them, and flag it when screenshots hold personal data, since `/tmp`
+  is world-readable. No new configuration and no new script flags.
 
 - **The loop's analyze gate scopes the command instead of loosening the bar.**
   `flutter analyze (zero warnings)` was a clean pass/fail that nobody could meet
@@ -277,6 +264,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   became "run the platforms the project actually ships". The four red lines keep
   their prohibitions: a hard guardrail is the one case that earns one.
 
+- **Red lines are now deny-by-default.** Spending real money, touching secrets or
+  credentials, and irreversible destruction are never performed unless the user
+  has authorized them upfront — in the run's instructions, or via
+  `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` in the project `CLAUDE.md`, and only within
+  the stated scope. Unattended runs skip an unauthorized red-line action, mark
+  "authorization needed" in the report, and move on instead of waiting for a human.
+- **The four red lines are no longer blockchain-specific.** They are stated in
+  general terms (payments/orders, credentials, irreversible destruction) with
+  on-chain transactions as one example among many; project-specific red lines go
+  in `{{IRREVERSIBLE_REDLINES}}`.
+- **Slimmer skill description.** The description is the skill's only
+  permanently-loaded text, so it now carries trigger conditions only — the
+  methodology it used to repeat lives in the skill body. Also dropped
+  "packaging", a trigger word with no matching content in the skill.
+- **Deduplicated the skill body.** Committing, the red lines, and the report
+  requirements each had two or three full copies; each now has a single
+  authoritative home, with the Rules block reduced to a pure checklist.
+- **Introduced "green zone"** as the counterpart to "red line" — everything
+  reversible and low-risk (installing tools, local config, dependencies,
+  scaffolding) that the agent should just finish and keep going, replacing six
+  separate spellings-out of the same rule.
+- **Report requirements are now a five-item completion bar** at the end of the
+  autonomous loop, so the loop's final step has a checkable bound.
+- **Section numbering fixed** — two sections previously both claimed to be the
+  first step. Context gathering is §1, environment bootstrap is §2, and the
+  device lookup states its dependency on the bootstrap explicitly.
+- **`references/tool-decision-tree.md`** no longer caches the full `mobilecli`
+  command surface. It keeps the traps and usages `mobilecli --help` cannot tell
+  you, and points at `--help` for the rest.
+
 ### Removed
 
 - **The reassurance that a missing memory mechanism is fine.** "Re-detecting
@@ -323,70 +340,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Repetition past the mechanism and the checklist was buying nothing; the space
   went to the three gaps above.
 
-## [1.1.0] - 2026-08-16
-
-### Added
-
-- **A GitHub Releases fallback when npm is blocked.** Reported from the field: a
-  corporate gateway intercepted the npm registry while GitHub stayed open, and
-  the skill's only documented fallbacks (`npx`, which hits the same registry,
-  and building from source, which needs a Go toolchain) were both dead ends — so
-  the run stopped for a human when it did not have to.
-  - `scripts/bootstrap.sh` now falls back to GitHub Releases for mobilecli and
-    jq, handling both macOS traps (missing exec bit, Gatekeeper quarantine).
-    It costs an unaffected machine nothing — the fallback only runs once the
-    normal channel has failed.
-  - A two-line rule in §2: classify a blocker as a **channel** problem (still
-    green zone — switch routes and continue) or a **permission** problem (a
-    genuine stop, since only a human can grant it in a GUI). Getting it
-    backwards costs either a needless stop or a burnt round of self-repair.
-  - `references/restricted-network.md` holds the rest behind a pointer, kept to
-    the handful of things an agent can't guess (npx shares the registry;
-    Gatekeeper quarantine; PATH not persisting across Bash calls; which tools
-    GitHub can't rescue). Scope is a blocked package source only — Xcode, the
-    Android SDK and vendor distribution domains are deliberately out of scope.
-- **`scripts/bootstrap.sh` now checks jq**, a hard dependency of
-  `scripts/tap-by-label.sh` that was previously never verified.
-- Two iOS gotchas: `agent install` backgrounds the app under test (relaunch
-  before dumping), and `xcrun simctl privacy grant/revoke` commonly fails with
-  `Operation not permitted` (reinstall the app or toggle the switch in Settings).
-- A Flutter interaction limit: a WDA-synthesised `io longpress` may not register
-  on the Flutter side; prefer making the gesture a tappable control with
-  `Semantics` instead of fighting it.
-
-### Changed
-
-- **Red lines are now deny-by-default.** Spending real money, touching secrets or
-  credentials, and irreversible destruction are never performed unless the user
-  has authorized them upfront — in the run's instructions, or via
-  `{{AUTHORIZED_REDLINE_EXCEPTIONS}}` in the project `CLAUDE.md`, and only within
-  the stated scope. Unattended runs skip an unauthorized red-line action, mark
-  "authorization needed" in the report, and move on instead of waiting for a human.
-- **The four red lines are no longer blockchain-specific.** They are stated in
-  general terms (payments/orders, credentials, irreversible destruction) with
-  on-chain transactions as one example among many; project-specific red lines go
-  in `{{IRREVERSIBLE_REDLINES}}`.
-- **Slimmer skill description.** The description is the skill's only
-  permanently-loaded text, so it now carries trigger conditions only — the
-  methodology it used to repeat lives in the skill body. Also dropped
-  "packaging", a trigger word with no matching content in the skill.
-- **Deduplicated the skill body.** Committing, the red lines, and the report
-  requirements each had two or three full copies; each now has a single
-  authoritative home, with the Rules block reduced to a pure checklist.
-- **Introduced "green zone"** as the counterpart to "red line" — everything
-  reversible and low-risk (installing tools, local config, dependencies,
-  scaffolding) that the agent should just finish and keep going, replacing six
-  separate spellings-out of the same rule.
-- **Report requirements are now a five-item completion bar** at the end of the
-  autonomous loop, so the loop's final step has a checkable bound.
-- **Section numbering fixed** — two sections previously both claimed to be the
-  first step. Context gathering is §1, environment bootstrap is §2, and the
-  device lookup states its dependency on the bootstrap explicitly.
-- **`references/tool-decision-tree.md`** no longer caches the full `mobilecli`
-  command surface. It keeps the traps and usages `mobilecli --help` cannot tell
-  you, and points at `--help` for the rest.
-
 ### Fixed
+
+- **`npx skills add` found no skill at all.** The frontmatter `description:` was
+  an unquoted YAML scalar containing `": "` (in `Use for: running the app…`),
+  which YAML reads as a nested mapping — so the skills CLI skipped both
+  `SKILL.md` files with a parse error and reported "No valid skills found". That
+  is install channel A, the one the README lists first. Both descriptions are now
+  single-quoted. Claude Code's own loader was more forgiving and had always read
+  the file, which is why this went unnoticed: the channel that broke was the one
+  the maintainer never used.
+
+- **The build-wait loop could spin forever.** It waited on the vmservice file or
+  a short list of grep patterns, so any failure outside that list (CocoaPods,
+  signing, `No supported devices`) left it polling until the harness killed it —
+  and the `<output>` it grepped never existed, since backgrounding the run left
+  no log file to read. The loop now has all three exits, and the launch keeps
+  output you can `tail`.
+  - Only "the process exited" counts as failure. The deadline is an alarm clock,
+    not a verdict: a cold checkout, a large project, a slow network or a CI
+    container can all legitimately build for half an hour, and a run that reads
+    its own alarm as a failed build and starts over with `flutter clean` turns
+    one slow build into two. Still alive with a growing log means keep waiting.
+
+- **`tap-by-label.sh` could tap nothing at all, and report success.** Two bugs,
+  both of which surface on ordinary Flutter screens:
+  - The TSV put the label first, unescaped. Semantics merging routinely produces
+    multi-line labels (a wallet row is `"Wallet 2\naddress\n$0"`), so one match
+    became several lines: the count inflated, `sed -n Np` picked a fragment with
+    no tabs, the coordinates read back empty, and `io tap ","` went out — while
+    the script printed "tapped" and exited 0. Coordinates now come first, the
+    label is whitespace-folded and emitted last through `@tsv`, and a coordinate
+    check refuses to tap on anything malformed instead of failing silently.
+  - Matches came back in document order, and jq's `..` is pre-order, so an
+    ancestor — whose merged label naturally contains the substring — always
+    ranked above the leaf. `--index 0` therefore tended to tap the row or card
+    wrapping the target, landing in its blank area: the exact "tapped it,
+    nothing happened" symptom. Matches are now sorted by rect area ascending,
+    so the default is the smallest — the leaf you meant — and `--dump-only`
+    prints the areas so a wrong pick is visible before you tap.
 
 - The README install badge is a static link until skills.sh install stats
   aggregate.
