@@ -5,7 +5,7 @@ compatibility: Requires Flutter SDK; Android via adb (mac/Linux); iOS via Xcode/
 metadata:
   author: z-chu
   version: "1.1.0"
-description: 'Autonomous Flutter on-device/simulator run & UI verification (iOS + Android parity). Use for: running the app on a device/simulator to see how it looks, simulated taps/typing/swipes, screenshot visual verification, log capture for diagnosis, E2E/integration regression (Patrol by Key), or self-driving the implement→verify-on-device→fix→commit loop. **Only use it when the app must actually run so you can look at the UI; do NOT use it for writing plain unit tests / pure-logic tests** (just run flutter test). Flutter 真机/模拟器自主运行与 UI 验证:上设备看效果、模拟点击/输入/滑动、截图核验、抓日志定位、Patrol E2E 回归。纯单测/纯逻辑测试不用本 skill。'
+description: 'Autonomous Flutter on-device/simulator run & UI verification (iOS + Android). Use for: running the app to see how a page actually looks, simulated taps/typing/swipes, screenshot verification, reproducing a device-only bug, log capture for diagnosis, Patrol E2E/integration regression, or self-driving the implement→verify-on-device→fix→commit loop. **Only when the app must actually run so you can look at the UI** — plain unit / pure-logic tests are just `flutter test`.'
 ---
 
 # Autonomous Flutter Development & On-Device/Simulator Testing
