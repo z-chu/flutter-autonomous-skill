@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The report must now say where the run artifacts were written.** A user who is never
+  told the path assumes nothing was produced, cannot reopen a screenshot later, and never
+  discovers they could have had them kept — so the completion bar's "key screenshots" item
+  now requires their location alongside them. `/tmp` stays the default (cleared on reboot,
+  never committed by accident), now as a per-run subdirectory so files don't collide across
+  runs, and §1 lists it as a detected fact like every other: name a directory in
+  `CLAUDE.md` to keep them, and flag it when screenshots hold personal data, since `/tmp`
+  is world-readable. No new configuration and no new script flags.
+
 ### Added
 
 - **`Semantics(identifier:)` in the code contract, and in the matcher.** The

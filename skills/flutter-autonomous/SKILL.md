@@ -40,6 +40,7 @@ Before doing anything, pin down "which project is this" — **auto-detect, don't
 - **Entry point / dart-defines** ← debug configs in `.vscode/launch.json` or the project `CLAUDE.md`
 - **Device** ← taken **live** at runtime from `mobilecli devices` after the §2 bootstrap; a device id lives only inside this run
 - **Log anchors / toolchain constraints (JDK/Xcode) / co-existing apps on the same device / business red lines** ← project `CLAUDE.md`
+- **Run-artifact directory** (screenshots, `dump ui` json, the `flutter run` log) ← project `CLAUDE.md` if it names one, else a per-run subdirectory under `/tmp` — cleared on reboot, never committed by accident. `/tmp` is world-readable: if a run's screenshots hold personal data (balances, addresses, account pages), flag it in the report; a user who wants them kept names a directory in `CLAUDE.md`.
 - **Commit policy (ask once before starting)** ← **committing is not this skill's call**: whether to commit and how (commit as you go / one commit at the end / don't commit / something else) **is the user's decision**. If the project `CLAUDE.md` states a commit policy, or this session's instruction does, follow it; **if not, ask once before you start running**, then follow that answer throughout. Commit conventions (precise `git add`, message format, whether to push, trailers) follow the user's **global / project `CLAUDE.md`** — don't decide them here on the user's behalf.
 
 **Detect once, don't re-detect at every step**: these values are stable within a project, so once you've detected them, **remember and reuse them for this session** — grepping `build.gradle` over and over inside one run is pure waste. If your environment has cross-session memory, store the **stable facts** there and use them directly next time: the package name and both platform ids, the entry point and dart-defines, how many platforms this project actually ships, where the Patrol tests live, roughly how long a cold build takes.
@@ -125,7 +126,8 @@ When you need to "tap it yourself, look at it yourself, and keep moving" on the 
 
 ```bash
 D=$(mobilecli devices | jq -r '.data.devices[0].id')   # output is {status,data:{devices:[…]}}; taken live at runtime, never hardcoded
-UI=/tmp/ui.json; SHOT=/tmp/shot.png                     # dump/screenshot to a file, then pick — don't dump the whole blob into context
+RUN=/tmp/<topic>; mkdir -p "$RUN"                       # §1 artifact dir; one dir per run so files don't collide
+UI="$RUN/ui.json"; SHOT="$RUN/01_home.png"              # dump/screenshot to a file, then pick — don't dump the whole blob into context
 APP=<applicationId or bundleId>                         # you already detected it in §1 (build.gradle / project.pbxproj); differs per platform
 mobilecli apps launch     --device "$D" "$APP"          # bring to foreground
 mobilecli apps foreground --device "$D"                 # confirm foreground = target app (anti cross-talk)
@@ -243,7 +245,7 @@ Counter-examples: "Remember me works fine", "the experience is smooth" — not d
 
 **After a fix, re-run the items that were passing, not just the one that was failing.** A fix that changes **scale, timing, or frequency** — page size, timeout, poll interval, concurrency, batch size — moves every race that used to be won by luck. Shrinking a page from "one big remote batch" to 15 items is enough to make a pre-existing race fire on every run, in a path that had been green all along. The item you fixed is the one you're watching; the regression lands somewhere you aren't.
 
-**Completion bar (the report)**: the loop ends in a report that must contain ① `✅/❌ feature name` + a **per-item acceptance table** (including items stuck at round 5) ② the list of changed files ③ key screenshots ④ (if committed per policy) commit hash + message ⑤ open issues. **Missing any one of these means it isn't done** — when running unattended, this evidence is what you harvest in the morning, not "it said it finished".
+**Completion bar (the report)**: the loop ends in a report that must contain ① `✅/❌ feature name` + a **per-item acceptance table** (including items stuck at round 5) ② the list of changed files ③ key screenshots **plus where they were written** ④ (if committed per policy) commit hash + message ⑤ open issues. **Missing any one of these means it isn't done** — when running unattended, this evidence is what you harvest in the morning, not "it said it finished".
 
 **Failure classification**: compile errors → read the `flutter analyze` output and fix; `found 0 widgets` → **pull the widget tree from the VM Service first to check the Key** (it carries source line numbers, faster than grepping code), then check whether a scroll / conditional render is needed; assertion failures → **it's a logic bug, fix the implementation, don't lower the test's bar**; crash/timeout → `mobilecli device crashes list|get` and read the first stack line matching `package:<your_app>/`; install/connection → `mobilecli devices` + one self-recovery attempt, stop if it still fails.
 
@@ -268,7 +270,7 @@ void main() => patrolTest('user can log in with email', ($) async {
 
 **Precondition**: if the device is already occupied by another `flutter run` (e.g. a VS Code debug session), free it first — `ps aux | grep "flutter_tools.snapshot run" | grep -v grep`; if there is one, ask the user to stop it before continuing, don't force-start.
 
-**Launch**: the command **must start with `flutter run`** (if your permission rules match by prefix, e.g. `Bash(flutter run:*)`, **wrapping** it in nohup/pipes/`&` gets blocked). Backgrounding is done with the `run_in_background: true` parameter; pass `--pid-file` (default `/tmp/flutter_app.pid`; append a project or device suffix when running several devices/sessions concurrently so they don't collide).
+**Launch**: the command **must start with `flutter run`** (if your permission rules match by prefix, e.g. `Bash(flutter run:*)`, **wrapping** it in nohup/pipes/`&` gets blocked). Backgrounding is done with the `run_in_background: true` parameter; pass `--pid-file` (default `/tmp/flutter_app.pid`; append a project or device suffix when running several devices/sessions concurrently so they don't collide). `<LOG_FILE>` goes in the §1 run-artifact directory (`"$RUN/flutter_run.log"`).
 
 **You also have to keep the build output readable**: once backgrounded, the real reason a build failed lives only in that output. Appending `> <LOG_FILE> 2>&1` is the simplest way (a redirect at the end of the command usually doesn't affect prefix matching); if your permission setup blocks it, **don't fight it** — read the background task's own output through whatever your harness provides. **Keep something you can `tail`; the form doesn't matter.**
 

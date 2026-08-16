@@ -40,6 +40,7 @@ description: 'Flutter 真机/模拟器自主运行与 UI 验证(iOS + Android �
 - **入口 / dart-defines** ← `.vscode/launch.json` 的 debug 配置 或 项目 `CLAUDE.md`
 - **设备** ← §2 自举后运行时 `mobilecli devices` **现取**;设备 id 只活在这次运行里
 - **日志锚点 / 工具链约束(JDK/Xcode)/ 同设备共存 App / 业务红线** ← 项目 `CLAUDE.md`
+- **本次运行的产物目录**(截图、`dump ui` json、`flutter run` 日志)← 项目 `CLAUDE.md` 指定了就用它,没指定就在 `/tmp` 下开一个本次运行专用的子目录——重启自动清、也不会被误提交。`/tmp` 是全机可读的:本次截图若含个人数据(余额、地址、账户页)要在报告里说明;想长期留存,让用户在 `CLAUDE.md` 指定目录。
 - **提交策略(开工前问一句)** ← **提交不是本 skill 的职责**:要不要 commit、怎么 commit(干一点提交一点 / 干完再统一提 / 不提交 / 其它要求)**由用户定**。项目 `CLAUDE.md` 写了提交策略、或本次指令已说明,就照做;**没说就先问一句再开跑**,问清后整个过程按它执行。提交规范(精确 `git add`、message 格式、是否 push、署名)以用户**全局 / 项目 `CLAUDE.md`** 为准,别在这里替用户定。
 
 **探一次就够,别每步重探**:这些值在一个项目里是稳定的,本次会话探到就**记住复用**——同一次运行里反复 grep `build.gradle` 是纯浪费。运行环境若有跨会话记忆,把**稳定事实**存进去下次直接用:包名与两端 id、入口与 dart-defines、这个项目实际发几端、Patrol 用例放哪、冷启构建大概多久。
@@ -125,7 +126,8 @@ Flutter 用 Skia/Impeller 画 canvas,系统无障碍树**默认**几乎空,但�
 
 ```bash
 D=$(mobilecli devices | jq -r '.data.devices[0].id')   # 输出是 {status,data:{devices:[…]}};运行期现取,绝不写死
-UI=/tmp/ui.json; SHOT=/tmp/shot.png                     # dump/截图落文件再挑,别整块进上下文
+RUN=/tmp/<主题>; mkdir -p "$RUN"                        # §1 产物目录;一次运行一个目录,避免跨次撞名
+UI="$RUN/ui.json"; SHOT="$RUN/01_home.png"              # dump/截图落文件再挑,别整块进上下文
 APP=<applicationId 或 bundleId>                         # §1 已自己探到(build.gradle / project.pbxproj),双端取值不同
 mobilecli apps launch     --device "$D" "$APP"          # 拉前台
 mobilecli apps foreground --device "$D"                 # 确认前台=目标 App(防串台)
@@ -243,7 +245,7 @@ Scaffold(key: const Key('home_screen'), ...)        // 页面根:判断"在不�
 
 **修完之后,原本通过的项也要重跑,不只是原本失败那项。**改动只要动了**规模、时序、频率**——页大小、超时、轮询间隔、并发数、批量大小——就会把所有原本靠运气赢下来的竞态重新洗牌。把一页从「远端一大批」压到 15 条,就足以让一个既有竞态从「撞不上」变成「每次必现」,而且现场在一条一直是绿的路径上。你盯着的是你修的那项,回归落在你没盯的地方。
 
-**完成门槛(报告)**:闭环的终点是一份报告,必须含 ① `✅/❌ 功能名` + **逐条验收对照**(含第 5 轮卡住项)② 改动文件清单 ③ 关键截图 ④(若按策略提交了)commit hash + message ⑤ 遗留问题。**缺一项不算完成**——无人值守时你早上是靠这份证据收割的,不是靠"它说做完了"。
+**完成门槛(报告)**:闭环的终点是一份报告,必须含 ① `✅/❌ 功能名` + **逐条验收对照**(含第 5 轮卡住项)② 改动文件清单 ③ 关键截图**及其落盘位置** ④(若按策略提交了)commit hash + message ⑤ 遗留问题。**缺一项不算完成**——无人值守时你早上是靠这份证据收割的,不是靠"它说做完了"。
 
 **失败分类**:编译错→`flutter analyze` 读错误修;`found 0 widgets`→**先用 VM Service 拉 widget 树核对 Key**(带源码行号,比翻代码快),再查是否需 scroll/条件渲染;断言失败→**逻辑 bug 改实现,不改测试降标准**;crash/超时→`mobilecli device crashes list|get` 读堆栈第一行 `package:<your_app>/`;安装/连接→`mobilecli devices` + 自救一次仍失败停。
 
@@ -268,7 +270,7 @@ void main() => patrolTest('用户可用邮箱登录', ($) async {
 
 **前置**:同设备若被别的 `flutter run` 占用(如 VS Code 调试),先释放——`ps aux | grep "flutter_tools.snapshot run" | grep -v grep`,有则提示用户停掉再继续,不强启。
 
-**启动**:命令**必须以 `flutter run` 开头**(若你的权限规则按前缀匹配如 `Bash(flutter run:*)`,nohup/管道/`&` **包裹**会被拦),后台化靠 `run_in_background: true` 参数;带 `--pid-file`(默认 `/tmp/flutter_app.pid`,多设备/会话并发时拼项目或设备后缀避免撞)。
+**启动**:命令**必须以 `flutter run` 开头**(若你的权限规则按前缀匹配如 `Bash(flutter run:*)`,nohup/管道/`&` **包裹**会被拦),后台化靠 `run_in_background: true` 参数;带 `--pid-file`(默认 `/tmp/flutter_app.pid`,多设备/会话并发时拼项目或设备后缀避免撞)。`<LOG_FILE>` 放 §1 产物目录(`"$RUN/flutter_run.log"`)。
 
 **同时要保证「构建输出还能读得到」**:后台化之后,构建失败的真正原因只在那份输出里。末尾追加 `> <LOG_FILE> 2>&1` 是最省事的做法(重定向跟在命令末尾,通常不影响前缀匹配);若你的权限配置把它拦下,就**别跟它较劲**——去读那个后台任务自己的输出(harness 提供的查看方式),效果一样。**要留一份能 `tail` 的东西,形式随便。**
 
